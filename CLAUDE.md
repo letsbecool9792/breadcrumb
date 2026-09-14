@@ -100,6 +100,7 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **`TileService.startActivityAndCollapse(Intent)` is deprecated** as of API 34. Use the `PendingIntent` overload.
 - **Cleartext HTTP is blocked by default** since Android 9. Local dev against `adb reverse` needs a network security config permitting cleartext to `localhost` — scoped to the **debug** build type only, never release.
 - Android Studio should open **`android/`** as the project root, not the repo root. Opening the repo root confuses Gradle sync.
+- **compileSdk is 36.1 and only android-30/34/35/36/36.1 are installed.** Some androidx libraries now require compileSdk 37 (lifecycle 2.11.0 does; 2.10.0 does not). Prefer pinning the library back over pulling down another SDK platform unless the newer version is actually needed — disk on this machine is tight.
 - **AGP 9 compiles Kotlin itself** (built-in Kotlin), which is why there is no `org.jetbrains.kotlin.android` plugin here. Consequence: KSP must be **2.3.1 or newer** — the older `<kotlin>-<ksp>` versions register generated sources through the `kotlin.sourceSets` DSL and AGP 9 rejects that at configuration time. Do **not** fix it with `android.disallowKotlinSourceSets=false`; Google explicitly advises against that flag. Bump KSP instead.
 
 ---
@@ -184,11 +185,12 @@ Do not start the next step until the current one is ticked. Do not batch several
 
 ### Phase 1 — Capture (local only; no AI, no backend)
 
-- [~] **1.1** Room: `Memory` entity, DAO, database
+- [x] **1.1** Room: `Memory` entity, DAO, database
       · *test:* `./gradlew connectedDebugAndroidTest` — 7 DAO tests on the device
-      · compiles clean; awaiting a device run
-- [ ] **1.2** Debug list screen showing all saved memories — temporary, replaced at 4.2
-      · *test:* launch app, rows render
+- [~] **1.2** Debug list screen showing all saved memories — temporary, replaced at 4.2
+      · includes a "+" that inserts a sample memory, since no capture surface exists yet
+      · *test:* launch app, tap + a few times, rows render and survive a restart
+      · builds clean; awaiting a device run
 - [ ] **1.3** Share sheet target for text and links (`ACTION_SEND`)
       · *test:* share a URL from Chrome → row appears
 - [ ] **1.4** Share sheet for images and PDFs; copy into app-private storage
