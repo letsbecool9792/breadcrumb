@@ -105,7 +105,9 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **Chip model: one primary `type`, plus a `hasLink` flag.** A file decides the primary type (IMAGE, PDF); otherwise LINK if the text contains a URL; otherwise TEXT. `hasLink` is set whenever shared text contains a URL, so a captioned photo shows IMAGE + LINK chips. LINK is the only kind that combines with another, which is why a single flag is enough rather than a set of types. **Any "link" filter must match `type = LINK OR hasLink`** — filtering on type alone misses every captioned photo and PDF. `hasLink` comes from shared text only, never OCR: a screenshot with a URL bar in it is not a link someone sent.
 - **Schema changes go through Room `AutoMigration` against the checked-in schema JSON** (`app/schemas/`). Never `fallbackToDestructiveMigration` — it would silently wipe saved memories on upgrade. v1 → v2 added `hasLink` with a backfill, and was verified by installing over a real v1 database on the phone.
 - **`EXTRA_SUBJECT` is not always a title.** WhatsApp sets it to `"Photo from <sender name>"` on image shares. Putting that in `Memory.title` is noise; filter obviously-generic subjects at 1.4.
-- **Clipboard-originated shares report `referrer = com.android.systemui`**, not the app the text came from, and carry `nt:source = clipboard`. Provenance (rule 7) is unavailable on that path — do not expect the tile at 1.6 to recover it.
+- **Clipboard-originated shares report `referrer = com.android.systemui`**, not the app the text came from, and carry `nt:source = clipboard`. Provenance (rule 7) is unavailable on that path — do not expect the tile at 1.6 to recover it. `SourceApps.normalize` records these as no source rather than as "System UI".
+- **Package visibility decides whether a source app's name can be read.** Without a `<queries>` declaration, Android 11+ hid most packages from Breadcrumb: WhatsApp was visible only because it had granted access to a shared file, and Chrome, sharing plain text, was not visible at all. The launcher-intent `<queries>` in the manifest fixes this without the policy-restricted `QUERY_ALL_PACKAGES`. Verified with `adb shell dumpsys package queries` (Chrome, WhatsApp, Gmail visible afterwards). **This cannot be covered by a portable test** — the obvious candidate, Settings, is force-queryable and visible regardless. Re-run that dumpsys check if the manifest's `<queries>` ever changes.
+- **Store the source app's name at capture, not just its package.** It is resolved while the app is installed and visible; resolving it later loses it for anything uninstalled since.
 - **Declare `text/html` alongside `text/plain` on share filters.** Some apps send rich text for links; cheap to accept, and `EXTRA_TEXT` still carries the plain fallback.
 - **`EXTRA_TEXT` and `EXTRA_PROCESS_TEXT` are `CharSequence`, not `String`.** `getStringExtra` returns null when the sender supplies styled text, turning a real share into "nothing to save" with no error. Always use `getCharSequenceExtra(...)?.toString()`.
 - **A shared `content://` URI is readable only while the receiving activity is alive.** Finish first and copy later and the copy fails with a SecurityException. So `MediaReceiverActivity` cannot use `windowNoDisplay` (which forces a finish inside `onCreate`); it uses a fully transparent theme and finishes once the copy completes. The same constraint means **provider metadata — notably `DATE_TAKEN` — must be read at capture time**; it cannot be backfilled later.
@@ -225,8 +227,15 @@ Do not start the next step until the current one is ticked. Do not batch several
       · *test:* share several images at once → one row each, "Saved N"
       · *test:* share a PDF → PDF row titled by its filename
       · *test:* delete a row / Clear → its stored file is removed too
-- [ ] **1.5** Source-app provenance via `Activity.getReferrer()`
-      · *test:* share from Chrome vs WhatsApp → different package recorded
+- [x] **1.5** Source-app provenance via `Activity.getReferrer()`
+      · package recording already landed with 1.3/1.4; this step makes it usable:
+        app name stored at capture, system surfaces dropped, `<queries>` for visibility
+      · *test:* `./gradlew testDebugUnitTest` — `SourceAppsTest`; on-device `SourceAppResolverTest`
+      · verified: Chrome share → "from Chrome"; WhatsApp → "from WhatsApp"; clipboard → no source
+      · verified: text selection toolbar reports the host app ("from Chrome"), so provenance
+        works on that path too
+      · verified: a Gmail PDF opens in Drive, so sharing it records "from Drive" — accepted as
+        correct, since Drive is where it was shared from
 - [ ] **1.6** QS tile → transparent activity → save clipboard
       · *test:* copy text, pull down Quick Settings, tap tile → row appears
       · ⚠ this is where the clipboard focus restriction bites — see gotchas above
@@ -267,6 +276,8 @@ Do not start the next step until the current one is ticked. Do not batch several
       · *test:* *"screenshot from April"* filters by both type and month
       · *test:* *"that link from WhatsApp"* also finds photos whose caption carried a link
         (filter on `type = LINK OR hasLink`)
+      · parsing must also extract a **source app** filter, matched against
+        `sourceAppLabel` — provenance is a filter, never mixed into embedded text
 - [ ] **4.4** Hybrid search via `$rankFusion` (rule #5)
       · *test:* a proper-noun query ("Qualcomm") beats the pure-vector baseline
 - [ ] **4.5** Tap a result → open the original artifact
