@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Breadcrumb</string>
+    <string name="capture_saved">Saved</string>
+    <string name="capture_nothing">Nothing to save</string>
 </resources>

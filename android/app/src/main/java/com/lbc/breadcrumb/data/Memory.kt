@@ -49,7 +49,11 @@ data class Memory(
     /** Filled by on-device ML Kit OCR (step 2.1). */
     val extractedText: String? = null,
 
-    /** Filled by the Gemini ingest pass (step 3.3). */
+    /**
+     * Starts as whatever the sharing app offered as a subject (Chrome sends the
+     * page title), so the list reads properly before anything has been
+     * processed. The Gemini ingest pass (step 3.3) refines it.
+     */
     val title: String? = null,
     val summary: String? = null,
     val entitiesJson: String? = null,
