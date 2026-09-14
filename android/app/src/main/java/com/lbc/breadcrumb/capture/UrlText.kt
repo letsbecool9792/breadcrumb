@@ -10,4 +10,23 @@ object UrlText {
     private val URL = Regex("""\b(?:https?://|www\.)\S+""", RegexOption.IGNORE_CASE)
 
     fun containsUrl(text: String?): Boolean = text != null && URL.containsMatchIn(text)
+
+    /**
+     * The host of the first URL in [text], as a person would name the site:
+     * "https://www.github.com/square/okhttp" -> "github.com".
+     */
+    fun firstHost(text: String?): String? {
+        val url = text?.let { URL.find(it)?.value } ?: return null
+        return url
+            .replaceFirst(Regex("^https?://", RegexOption.IGNORE_CASE), "")
+            .substringBefore('/')
+            .substringBefore('?')
+            .substringBefore('#')
+            .substringBefore(':')
+            .trimEnd('.', ',', ')', ']', '!', '?', ';')
+            .removePrefix("www.")
+            .removePrefix("WWW.")
+            .lowercase()
+            .takeIf { it.contains('.') }
+    }
 }
