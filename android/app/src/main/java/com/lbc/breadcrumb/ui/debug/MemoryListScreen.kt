@@ -30,12 +30,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -135,7 +139,11 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 
 @Composable
 private fun MemoryRow(memory: Memory, onDelete: () -> Unit) {
+    // tap a row to see all of its OCR text, not just the first lines
+    var expanded by remember { mutableStateOf(false) }
+
     Card(
+        onClick = { expanded = !expanded },
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -188,12 +196,25 @@ private fun MemoryRow(memory: Memory, onDelete: () -> Unit) {
                 Spacer(Modifier.size(8.dp))
             }
 
-            Text(
-                text = memory.searchableText.ifBlank { "(no text)" },
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // What came with the save, kept apart from what OCR read, so the
+            // debug list shows which of the two a piece of text came from.
+            val sharedText = listOfNotNull(memory.title, memory.summary, memory.rawText)
+                .filter { it.isNotBlank() }
+                .joinToString("\n")
+            val isImage = memory.type == MemoryType.IMAGE
+
+            if (sharedText.isNotEmpty() || !isImage) {
+                Text(
+                    text = sharedText.ifEmpty { "(no text)" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (isImage) {
+                if (sharedText.isNotEmpty()) Spacer(Modifier.size(6.dp))
+                OcrText(memory.extractedText, expanded)
+            }
 
             // Debug-only facts that prove capture worked: provenance, the stored
             // file and its size, and the content's own creation date.
@@ -218,6 +239,35 @@ private fun MemoryRow(memory: Memory, onDelete: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+/** An image's OCR text, or where reading it has got to. */
+@Composable
+private fun OcrText(extractedText: String?, expanded: Boolean) {
+    if (extractedText.isNullOrEmpty()) {
+        Text(
+            text = if (extractedText == null) "reading text…" else "no text found",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    Column {
+        Text(
+            text = "ocr · ${extractedText.lines().size} lines",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.size(2.dp))
+        Text(
+            text = extractedText,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            maxLines = if (expanded) Int.MAX_VALUE else 6,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
