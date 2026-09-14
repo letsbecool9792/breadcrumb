@@ -100,12 +100,15 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **minSdk 29** (Android 10), target latest. Rationale: the clipboard restriction lands at 29, so a 29 floor means one code path instead of two; scoped storage is mandatory from 29 anyway; device coverage is a non-issue in 2026.
 - **Clipboard cannot be read from a `TileService`.** Android 10+ blocks clipboard access unless the app has focus or is the default IME, and a tile service has neither — you get null. The fix is for the tile to launch a transparent, no-animation Activity that reads the clipboard and finishes immediately.
 - **`TileService.startActivityAndCollapse(Intent)` is deprecated** as of API 34. Use the `PendingIntent` overload.
-- **WhatsApp shares a link-with-preview message as `image/jpeg`, not as text.** Verified on-device with the debug share probe: the intent is indistinguishable from sharing a photo — the preview thumbnail as `EXTRA_STREAM`, no text mime anywhere. So a text-only filter correctly declines it, and link-preview capture from WhatsApp only starts working once `image/*` is accepted at 1.4. A message that is *only* a link-with-preview offers no Share at all, since WhatsApp treats media-only messages as forward-only.
+- **WhatsApp offers no Share on text messages or on link-preview messages** — with or without accompanying text. Only Copy and Forward. No manifest change reaches either; copy → clipboard tile (1.6) is the path. (An earlier note here claimed link previews arrive as `image/jpeg`. That was a misread: the message tested contained a real photo, not a preview card.)
+- **A WhatsApp photo shared with a caption arrives as `image/jpeg` with the caption in `EXTRA_TEXT`.** Saved as an IMAGE with the caption as `rawText`, plus `hasLink` when the caption carries a URL — see the chip model below.
+- **Chip model: one primary `type`, plus a `hasLink` flag.** A file decides the primary type (IMAGE, PDF); otherwise LINK if the text contains a URL; otherwise TEXT. `hasLink` is set whenever shared text contains a URL, so a captioned photo shows IMAGE + LINK chips. LINK is the only kind that combines with another, which is why a single flag is enough rather than a set of types. **Any "link" filter must match `type = LINK OR hasLink`** — filtering on type alone misses every captioned photo and PDF. `hasLink` comes from shared text only, never OCR: a screenshot with a URL bar in it is not a link someone sent.
+- **Schema changes go through Room `AutoMigration` against the checked-in schema JSON** (`app/schemas/`). Never `fallbackToDestructiveMigration` — it would silently wipe saved memories on upgrade. v1 → v2 added `hasLink` with a backfill, and was verified by installing over a real v1 database on the phone.
 - **`EXTRA_SUBJECT` is not always a title.** WhatsApp sets it to `"Photo from <sender name>"` on image shares. Putting that in `Memory.title` is noise; filter obviously-generic subjects at 1.4.
 - **Clipboard-originated shares report `referrer = com.android.systemui`**, not the app the text came from, and carry `nt:source = clipboard`. Provenance (rule 7) is unavailable on that path — do not expect the tile at 1.6 to recover it.
 - **Declare `text/html` alongside `text/plain` on share filters.** Some apps send rich text for links; cheap to accept, and `EXTRA_TEXT` still carries the plain fallback.
 - **`EXTRA_TEXT` and `EXTRA_PROCESS_TEXT` are `CharSequence`, not `String`.** `getStringExtra` returns null when the sender supplies styled text, turning a real share into "nothing to save" with no error. Always use `getCharSequenceExtra(...)?.toString()`.
-- **WhatsApp offers no Share on plain text messages at all** — only Copy and Forward. No manifest change reaches that case; the clipboard tile (1.6) is the path.
+- **A shared `content://` URI is readable only while the receiving activity is alive.** Finish first and copy later and the copy fails with a SecurityException. So `MediaReceiverActivity` cannot use `windowNoDisplay` (which forces a finish inside `onCreate`); it uses a fully transparent theme and finishes once the copy completes. The same constraint means **provider metadata — notably `DATE_TAKEN` — must be read at capture time**; it cannot be backfilled later.
 - **Cleartext HTTP is blocked by default** since Android 9. Local dev against `adb reverse` needs a network security config permitting cleartext to `localhost` — scoped to the **debug** build type only, never release.
 - Android Studio should open **`android/`** as the project root, not the repo root. Opening the repo root confuses Gradle sync.
 - **compileSdk is 36.1 and only android-30/34/35/36/36.1 are installed.** Some androidx libraries now require compileSdk 37 (lifecycle 2.11.0 does; 2.10.0 does not). Prefer pinning the library back over pulling down another SDK platform unless the newer version is actually needed — disk on this machine is tight.
@@ -135,6 +138,15 @@ CLI build/install, when the IDE is not open:
 cd android && ./gradlew installDebug
 adb shell am start -n com.lbc.breadcrumb/.MainActivity
 ```
+
+Instrumented tests, **without wiping saved memories**. Gradle's `connectedDebugAndroidTest` removes the APKs when the run finishes, and uninstalling the app deletes its Room database and stored originals. Install and instrument directly instead:
+
+```
+cd android && ./gradlew installDebug installDebugAndroidTest
+adb shell am instrument -w com.lbc.breadcrumb.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+**If a build fails with `jlink executable ... redhat.java ... does not exist`:** VS Code's Java extension imported `android/` and left an idle Gradle daemon running on its bundled JRE, which has no `jlink`. `gradlew` reuses any idle Java 21 daemon, so it inherits the broken JVM. Run `./gradlew --stop` and rebuild. To stop it recurring, set `"java.import.gradle.enabled": false` in VS Code for this workspace — that extension cannot build Android projects anyway, and the daemon it keeps alive is pure RAM cost.
 
 ### Backend deployment — deferred, not decided
 
@@ -198,16 +210,21 @@ Do not start the next step until the current one is ticked. Do not batch several
 - [x] **1.2** Debug list screen showing all saved memories — temporary, replaced at 4.2
       · includes a "+" that inserts a sample memory, since no capture surface exists yet
       · *test:* launch app, tap + a few times, rows render and survive a restart
-- [~] **1.3** Share sheet target for text and links (`ACTION_SEND`, `ACTION_PROCESS_TEXT`)
+- [x] **1.3** Share sheet target for text and links (`ACTION_SEND`, `ACTION_PROCESS_TEXT`)
       · *test:* `./gradlew testDebugUnitTest` — 13 JVM tests on the classification rules
       · *test:* share a URL from Chrome → LINK row with the page title as its title
       · *test:* select text anywhere → Breadcrumb in the selection toolbar → TEXT row
       · confirms with a toast for now; the designed capture sheet lands at 1.7
-- [ ] **1.4** Share sheet for images and PDFs; copy into app-private storage
-      · *test:* share a screenshot from the gallery → file copied, row created
-      · *test:* share a WhatsApp link-with-preview → arrives as `image/jpeg`, must still
-        be saved usefully (see the WhatsApp note in gotchas)
-      · must filter generic `EXTRA_SUBJECT` values like "Photo from <name>"
+- [x] **1.4** Share sheet for images and PDFs; copy into app-private storage
+      · *test:* `./gradlew testDebugUnitTest` — media classification, EXIF dates, URL detection,
+        and the chip table
+      · *test:* on-device `OriginalStoreTest` — byte-exact copy, delete never escapes the store
+      · *test:* share a screenshot from the gallery → thumbnail, file size and taken date in the row
+      · *test:* share a WhatsApp photo with a caption → IMAGE row, caption as its text,
+        plus a LINK chip when the caption has a URL (chip table in `MemoryChipsTest`)
+      · *test:* share several images at once → one row each, "Saved N"
+      · *test:* share a PDF → PDF row titled by its filename
+      · *test:* delete a row / Clear → its stored file is removed too
 - [ ] **1.5** Source-app provenance via `Activity.getReferrer()`
       · *test:* share from Chrome vs WhatsApp → different package recorded
 - [ ] **1.6** QS tile → transparent activity → save clipboard
@@ -248,10 +265,14 @@ Do not start the next step until the current one is ticked. Do not batch several
       · *test:* type a query on device, see ranked results
 - [ ] **4.3** Flash-Lite query parsing → type and date filters (rule #6)
       · *test:* *"screenshot from April"* filters by both type and month
+      · *test:* *"that link from WhatsApp"* also finds photos whose caption carried a link
+        (filter on `type = LINK OR hasLink`)
 - [ ] **4.4** Hybrid search via `$rankFusion` (rule #5)
       · *test:* a proper-noun query ("Qualcomm") beats the pure-vector baseline
 - [ ] **4.5** Tap a result → open the original artifact
       · *test:* tap a saved screenshot → opens in a viewer
+      · *test:* tap a saved PDF → opens in a PDF viewer (originals are app-private, so
+        this needs a FileProvider to hand another app read access)
 
 ### Phase 5 — Seeding
 
