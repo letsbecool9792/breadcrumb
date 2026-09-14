@@ -112,7 +112,8 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **Store the source app's name at capture, not just its package.** It is resolved while the app is installed and visible; resolving it later loses it for anything uninstalled since.
 - **Declare `text/html` alongside `text/plain` on share filters.** Some apps send rich text for links; cheap to accept, and `EXTRA_TEXT` still carries the plain fallback.
 - **`EXTRA_TEXT` and `EXTRA_PROCESS_TEXT` are `CharSequence`, not `String`.** `getStringExtra` returns null when the sender supplies styled text, turning a real share into "nothing to save" with no error. Always use `getCharSequenceExtra(...)?.toString()`.
-- **A shared `content://` URI is readable only while the receiving activity is alive.** Finish first and copy later and the copy fails with a SecurityException. So `MediaReceiverActivity` cannot use `windowNoDisplay` (which forces a finish inside `onCreate`); it uses a fully transparent theme and finishes once the copy completes. The same constraint means **provider metadata — notably `DATE_TAKEN` — must be read at capture time**; it cannot be backfilled later.
+- **A shared `content://` URI is readable only while the receiving activity is alive.** Finish first and copy later and the copy fails with a SecurityException. So the capture sheet **cannot be dismissed while it shows "Saving…"** — swipe, back and tapping outside are all ignored until the copy completes, because closing the activity would revoke the grant mid-copy. The same constraint means **provider metadata — notably `DATE_TAKEN` — must be read at capture time**; it cannot be backfilled later.
+- **Closing a capture activity is a cross-task transition, and apps cannot customise those.** Sharing apps launch targets with `NEW_TASK` / `NEW_DOCUMENT` and the tile must use `NEW_TASK`, so every capture activity runs in its own task. On finish the system slides the window down; `overrideActivityTransition`, `overridePendingTransition` and `windowAnimationStyle` are all ignored for cross-task transitions. Whatever the window still holds slides with it — on-device, the dim slid away a beat after the sheet. The fix (`CaptureActivity.finishInvisibly`): make the decor view `INVISIBLE`, wait two frames for the window manager to hide the surface, then finish. Diagnosed from logcat: SurfaceFlinger layer names at close showed a `Transition Root` for the underlying task and no system dim or backdrop layer, which placed the tint in our own window. **Any future transparent activity that must close cleanly needs the same treatment.**
 - **Cleartext HTTP is blocked by default** since Android 9. Local dev against `adb reverse` needs a network security config permitting cleartext to `localhost` — scoped to the **debug** build type only, never release.
 - Android Studio should open **`android/`** as the project root, not the repo root. Opening the repo root confuses Gradle sync.
 - **compileSdk is 36.1 and only android-30/34/35/36/36.1 are installed.** Some androidx libraries now require compileSdk 37 (lifecycle 2.11.0 does; 2.10.0 does not). Prefer pinning the library back over pulling down another SDK platform unless the newer version is actually needed — disk on this machine is tight.
@@ -245,10 +246,26 @@ Do not start the next step until the current one is ticked. Do not batch several
       · **not verified on device:** the sensitive-clip skip. No password manager to test with,
         so it rests on `ClipboardRulesTest` alone. Worth a real check if one is ever installed.
       · tapping twice saves the clipboard twice. Accepted — no duplicate detection wanted
-- [ ] **1.7** Replace the capture toast with the designed capture sheet
+- [x] **1.7** Replace the capture toast with the designed capture sheet
       · board 4 of the design canvas: sheet over the host app, crumb drop, undo
-      · `Theme.Breadcrumb.Capture` drops `windowNoDisplay` and becomes a real
-        translucent window at this point
+      · all capture activities now extend `CaptureActivity` (a `ComponentActivity`) and share
+        one translucent `Theme.Breadcrumb.Capture`; `windowNoDisplay` is gone
+      · *test:* `./gradlew testDebugUnitTest` — `CaptureSummaryTest` (wording and preview shape)
+      · the sheet **stays until dismissed** (Done, swipe down, tap outside, back); only undo
+        closes it on its own, after showing "Removed"
+      · scrim and sheet share one transition, and Android's own open/close window animations
+        are switched off — the dim must leave with the sheet, never a beat after it
+      · *test:* dismiss any way → dim fades out together with the sheet, nothing slides after
+      · *test:* one photo → shown large, following its shape (screenshots cropped from the top)
+      · *test:* several images → row of square tiles, "+N" on the third
+      · *test:* a Chrome page → link card: site, page title, URL
+      · *test:* shared text → the text itself; a PDF → document card with title, type, size
+      · *test:* Undo → "Removed", closes, row and stored file gone
+      · *test:* a failure (empty clipboard) → reason and a Close button
+      · verified on device, all paths: previews, undo, failures, and a clean close with no
+        dim sliding away afterwards
+      · open: mono text uses the system monospace as a stand-in for IBM Plex Mono; bundling
+        the design's fonts is a separate decision
 
 ### Phase 2 — On-device intelligence (still no backend)
 
