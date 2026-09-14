@@ -92,6 +92,29 @@
                 <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
+
+        <!-- Reads the clipboard for the Quick Settings tile. Not exported: only
+             our own tile launches it. Uses the translucent theme because it
+             must gain window focus before Android will hand over the clipboard. -->
+        <activity
+            android:name=".capture.ClipboardCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/app_name"
+            android:theme="@style/Theme.Breadcrumb.CaptureTranslucent" />
+
+        <service
+            android:name=".capture.CaptureTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_crumb"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
