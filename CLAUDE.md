@@ -114,6 +114,9 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **`EXTRA_TEXT` and `EXTRA_PROCESS_TEXT` are `CharSequence`, not `String`.** `getStringExtra` returns null when the sender supplies styled text, turning a real share into "nothing to save" with no error. Always use `getCharSequenceExtra(...)?.toString()`.
 - **A shared `content://` URI is readable only while the receiving activity is alive.** Finish first and copy later and the copy fails with a SecurityException. So the capture sheet **cannot be dismissed while it shows "Saving…"** — swipe, back and tapping outside are all ignored until the copy completes, because closing the activity would revoke the grant mid-copy. The same constraint means **provider metadata — notably `DATE_TAKEN` — must be read at capture time**; it cannot be backfilled later.
 - **Closing a capture activity is a cross-task transition, and apps cannot customise those.** Sharing apps launch targets with `NEW_TASK` / `NEW_DOCUMENT` and the tile must use `NEW_TASK`, so every capture activity runs in its own task. On finish the system slides the window down; `overrideActivityTransition`, `overridePendingTransition` and `windowAnimationStyle` are all ignored for cross-task transitions. Whatever the window still holds slides with it — on-device, the dim slid away a beat after the sheet. The fix (`CaptureActivity.finishInvisibly`): make the decor view `INVISIBLE`, wait two frames for the window manager to hide the surface, then finish. Diagnosed from logcat: SurfaceFlinger layer names at close showed a `Transition Root` for the underlying task and no system dim or backdrop layer, which placed the tint in our own window. **Any future transparent activity that must close cleanly needs the same treatment.**
+- **OCR uses ML Kit's bundled model** (`com.google.mlkit:text-recognition`), not `play-services-mlkit-text-recognition`, which downloads its model on first use and so is not offline from the first save. Gradle fetches the model from Google's Maven at build time and packs it into the APK; nothing is checked in. The cost is APK size: its native library is ~11 MB per ABI, ~41 MB across all four, of which x86/x86_64 serve only emulators. The arm64 library is 16 KB page-aligned (checked from its ELF headers).
+- **`extractedText`: null means not read yet, empty means read and holding no text.** `OcrQueue` finds its work by that null, so never write empty to mean anything else, and resetting a row to null queues it to be read again.
+- **Nothing calls OCR.** `OcrQueue` starts in `BreadcrumbApp.onCreate` — every process, capture included — and watches Room for unread images. Any code that inserts IMAGE rows, the 5.1 importer included, gets them read without doing anything.
 - **Cleartext HTTP is blocked by default** since Android 9. Local dev against `adb reverse` needs a network security config permitting cleartext to `localhost` — scoped to the **debug** build type only, never release.
 - Android Studio should open **`android/`** as the project root, not the repo root. Opening the repo root confuses Gradle sync.
 - **compileSdk is 36.1 and only android-30/34/35/36/36.1 are installed.** Some androidx libraries now require compileSdk 37 (lifecycle 2.11.0 does; 2.10.0 does not). Prefer pinning the library back over pulling down another SDK platform unless the newer version is actually needed — disk on this machine is tight.
@@ -269,9 +272,18 @@ Do not start the next step until the current one is ticked. Do not batch several
 
 ### Phase 2 — On-device intelligence (still no backend)
 
-- [ ] **2.1** ML Kit OCR on image saves → store extracted text
-      · *test:* share a text-heavy screenshot → OCR text visible in debug list
-- [ ] **2.2** Room FTS index + local keyword search
+- [x] **2.1** ML Kit OCR on image saves → store extracted text
+      · *test:* `./gradlew testDebugUnitTest` — `OcrRulesTest` (downsampling, EXIF rotation, cleanup)
+      · *test:* on-device `OcrQueueTest` — fake reader: newest first, failures skipped rather than
+        retried, a memory undone mid-read stays deleted; `MlKitOcrReaderTest` — the real model
+        against images the test draws
+      · *test:* share a text-heavy screenshot → "ocr · N lines" in the debug list, full text on tap
+      · verified on device: images saved in phase 1 were read on the next launch; a text-heavy
+        screenshot shows its text; a photo without text shows "no text found"; the capture sheet
+        animates as before
+      · open: Latin script only. And nothing in V1 reads a **PDF's contents** — 2.1 and 3.6 are
+        images only — so a PDF is findable by filename alone until that is decided
+- [~] **2.2** Room FTS index + local keyword search
       · *test:* search a word that appears only inside a screenshot
 
 ### Phase 3 — Backend + ingest
