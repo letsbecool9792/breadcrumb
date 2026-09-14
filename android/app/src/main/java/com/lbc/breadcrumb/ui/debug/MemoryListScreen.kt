@@ -44,6 +44,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.SyncState
+import com.lbc.breadcrumb.ui.common.OriginalPreview
+import com.lbc.breadcrumb.ui.common.loadOriginalPreview
 import com.lbc.breadcrumb.ui.theme.BreadcrumbTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

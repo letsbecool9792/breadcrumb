@@ -1,4 +1,4 @@
-package com.lbc.breadcrumb.ui.debug
+package com.lbc.breadcrumb.ui.common
 
 import android.content.Context
 import android.graphics.BitmapFactory
@@ -9,13 +9,13 @@ import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.OriginalStore
 import java.io.File
 
-/** What the debug list shows for a memory's stored file. */
+/** A memory's stored file, as small UI surfaces show it: a thumbnail and a type/size label. */
 data class OriginalPreview(val thumbnail: ImageBitmap?, val label: String)
 
 /**
- * Decodes a small thumbnail straight from disk. Deliberately no image-loading
- * library: this screen is thrown away at 4.2, and the real UI will want
- * caching and placeholders that belong in that decision, not this one.
+ * Decodes a small thumbnail straight from disk. Used by the debug list and the
+ * capture sheet. Deliberately no image-loading library yet: the search UI at
+ * 4.2 will want caching and placeholders, and that decision belongs there.
  *
  * Call off the main thread.
  */
