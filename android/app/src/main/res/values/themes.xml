@@ -12,18 +12,13 @@
         <item name="postSplashScreenTheme">@style/Theme.Breadcrumb</item>
     </style>
 
-    <!-- Capture surfaces draw nothing and finish immediately, so they show no
-         window at all, and no blank activity flashes over the app you were in.
-         An activity with windowNoDisplay MUST finish() in onCreate. -->
+    <!-- Every capture surface: a transparent window over the app the save came
+         from, holding the capture sheet. No window animation, since the sheet
+         animates itself. (Until 1.7 the text receiver used windowNoDisplay
+         and finished inside onCreate; drawing a sheet rules that out.) -->
     <style name="Theme.Breadcrumb.Capture" parent="android:Theme.Translucent.NoTitleBar">
-        <item name="android:windowNoDisplay">true</item>
         <item name="android:windowAnimationStyle">@null</item>
-    </style>
-
-    <!-- For capture surfaces that must outlive onCreate, such as copying a
-         shared file while its read grant is still held. A real window, but a
-         fully transparent one with no animation, so it is still invisible. -->
-    <style name="Theme.Breadcrumb.CaptureTranslucent" parent="android:Theme.Translucent.NoTitleBar">
-        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

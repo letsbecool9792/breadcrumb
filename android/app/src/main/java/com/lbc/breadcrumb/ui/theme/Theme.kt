@@ -20,6 +20,7 @@ private val DarkColorScheme = darkColorScheme(
     surfaceVariant = InkElevated,
     onSurfaceVariant = BoneDim,
     outline = InkOutline,
+    outlineVariant = InkBorder,
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -36,6 +37,7 @@ private val LightColorScheme = lightColorScheme(
     surfaceVariant = ParchmentVariant,
     onSurfaceVariant = UmberDim,
     outline = InkOutline,
+    outlineVariant = ParchmentBorder,
 )
 
 /**

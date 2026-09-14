@@ -1,15 +1,9 @@
 package com.lbc.breadcrumb.capture
 
-import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import android.os.Bundle
-import android.widget.Toast
 import androidx.core.content.IntentCompat
-import com.lbc.breadcrumb.BreadcrumbApp
 import com.lbc.breadcrumb.R
-import com.lbc.breadcrumb.data.BreadcrumbDatabase
-import com.lbc.breadcrumb.data.OriginalStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -17,57 +11,35 @@ import kotlinx.coroutines.withContext
 /**
  * Share sheet entry point for images and PDFs.
  *
- * Separate from [ShareReceiverActivity] because it cannot finish instantly.
  * The read grant on a shared content:// URI lasts only while the receiving
- * activity is alive, so this one stays up -- invisibly, via a translucent
- * theme rather than windowNoDisplay, which would force a finish inside
- * onCreate -- until every file has been copied in.
+ * activity is alive, so this one must stay up until every file has been copied
+ * in. The capture sheet makes that visible -- "Saving…" -- and refuses to be
+ * dismissed until the copy is done.
  */
-class MediaReceiverActivity : Activity() {
+class MediaReceiverActivity : CaptureActivity() {
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        // A recreation (rotation mid-copy) must not save everything twice. The
-        // original job is still running and will report on its own.
-        if (savedInstanceState != null) {
-            finish()
-            return
-        }
-
+    override fun onCapture() {
         val uris = sharedUris(intent)
-        if (uris.isEmpty()) {
-            Toast.makeText(this, R.string.capture_nothing, Toast.LENGTH_SHORT).show()
-            finish()
-            return
-        }
+        if (uris.isEmpty()) return showFailed(R.string.capture_nothing)
 
-        val capture = MediaCapture(
-            context = applicationContext,
-            dao = BreadcrumbDatabase.get(this).memoryDao(),
-            store = OriginalStore(applicationContext),
-        )
+        val capture = MediaCapture(applicationContext, dao, store)
         val sharedText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
         val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT)
         val intentType = intent.type
         // android-app://com.whatsapp -> com.whatsapp -> "WhatsApp"
         val source = SourceAppResolver(this).resolve(referrer?.authority)
 
-        (application as BreadcrumbApp).applicationScope.launch {
+        app.applicationScope.launch {
             val result = capture.save(uris, intentType, sharedText, subject, source)
 
             withContext(Dispatchers.Main) {
-                Toast.makeText(applicationContext, message(result), Toast.LENGTH_SHORT).show()
-                if (!isFinishing && !isDestroyed) finish()
+                if (result.saved == 0) {
+                    showFailed(R.string.capture_failed)
+                } else {
+                    showSaved(result.memories, result.attempted)
+                }
             }
         }
-    }
-
-    private fun message(result: CaptureResult): String = when {
-        result.saved == 0 -> getString(R.string.capture_failed)
-        result.attempted == 1 -> getString(R.string.capture_saved)
-        result.saved == result.attempted -> getString(R.string.capture_saved_count, result.saved)
-        else -> getString(R.string.capture_saved_partial, result.saved, result.attempted)
     }
 
     /**

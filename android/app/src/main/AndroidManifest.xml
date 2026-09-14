@@ -40,7 +40,9 @@
 
         <!-- Share sheet target. excludeFromRecents + noHistory + empty
              taskAffinity keep it out of the recents list and off the back
-             stack, so it never appears to be "the app" the user opened. -->
+             stack, so it never appears to be "the app" the user opened.
+             Every capture activity handles its own config changes: a rotation
+             mid-save would otherwise recreate it and drop the capture sheet. -->
         <activity
             android:name=".capture.ShareReceiverActivity"
             android:exported="true"
@@ -48,6 +50,7 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:label="@string/app_name"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:theme="@style/Theme.Breadcrumb.Capture">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -81,7 +84,8 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:label="@string/app_name"
-            android:theme="@style/Theme.Breadcrumb.CaptureTranslucent">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:theme="@style/Theme.Breadcrumb.Capture">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
@@ -94,8 +98,8 @@
         </activity>
 
         <!-- Reads the clipboard for the Quick Settings tile. Not exported: only
-             our own tile launches it. Uses the translucent theme because it
-             must gain window focus before Android will hand over the clipboard. -->
+             our own tile launches it. Its window must gain focus before Android
+             will hand over the clipboard. -->
         <activity
             android:name=".capture.ClipboardCaptureActivity"
             android:exported="false"
@@ -103,7 +107,8 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:label="@string/app_name"
-            android:theme="@style/Theme.Breadcrumb.CaptureTranslucent" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:theme="@style/Theme.Breadcrumb.Capture" />
 
         <service
             android:name=".capture.CaptureTileService"

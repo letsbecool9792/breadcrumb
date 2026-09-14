@@ -6,12 +6,16 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
+import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryDao
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.OriginalStore
 import java.io.File
 
-data class CaptureResult(val saved: Int, val attempted: Int)
+/** The memories actually written -- what the capture sheet shows, and what undo removes. */
+data class CaptureResult(val memories: List<Memory>, val attempted: Int) {
+    val saved: Int get() = memories.size
+}
 
 /**
  * Copies shared files in and writes their memories. Everything here is local
@@ -32,7 +36,7 @@ class MediaCapture(
         now: Long = System.currentTimeMillis(),
     ): CaptureResult {
         val accepted = uris.filter { MediaShareParser.isAcceptableScheme(it.scheme) }
-        var saved = 0
+        val saved = mutableListOf<Memory>()
 
         for (uri in accepted) {
             val incoming = describe(uri, intentType)
@@ -61,14 +65,14 @@ class MediaCapture(
 
             try {
                 dao.upsert(memory)
-                saved++
+                saved += memory
             } catch (e: Exception) {
                 Log.w(TAG, "could not record $uri", e)
                 file.delete()
             }
         }
 
-        return CaptureResult(saved = saved, attempted = uris.size)
+        return CaptureResult(memories = saved, attempted = uris.size)
     }
 
     /**

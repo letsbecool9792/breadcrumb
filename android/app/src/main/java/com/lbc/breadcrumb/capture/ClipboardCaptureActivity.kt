@@ -1,18 +1,11 @@
 package com.lbc.breadcrumb.capture
 
-import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.net.Uri
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.widget.Toast
-import androidx.annotation.StringRes
-import com.lbc.breadcrumb.BreadcrumbApp
 import com.lbc.breadcrumb.R
-import com.lbc.breadcrumb.data.BreadcrumbDatabase
-import com.lbc.breadcrumb.data.OriginalStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,33 +14,30 @@ import kotlinx.coroutines.withContext
  * Saves whatever is on the clipboard. Launched by [CaptureTileService].
  *
  * Android 10+ only lets the app with window focus read the clipboard, and focus
- * arrives after onCreate -- reading there returns null every time. So this
- * activity waits for [onWindowFocusChanged], which also rules out
- * windowNoDisplay: a window that never shows never gets focus. It uses the
- * fully transparent capture theme instead.
+ * arrives after onCreate -- reading there returns null every time. So capture
+ * waits for [onWindowFocusChanged]. The capture sheet is already on screen by
+ * then, showing "Saving…".
  *
  * Provenance is unavailable on this path; the clipboard does not record which
  * app copied something.
  */
-class ClipboardCaptureActivity : Activity() {
+class ClipboardCaptureActivity : CaptureActivity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var handled = false
 
     /**
      * If focus never arrives -- another window holding it, an OEM quirk --
-     * give up visibly rather than leaving an invisible activity sitting on top
-     * of everything and eating touches.
+     * report it rather than sitting on "Saving…" indefinitely.
      */
     private val focusTimeout = Runnable {
         if (!handled) {
             handled = true
-            done(R.string.capture_clipboard_unreadable)
+            showFailed(R.string.capture_clipboard_unreadable)
         }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    override fun onCapture() {
         handler.postDelayed(focusTimeout, FOCUS_TIMEOUT_MS)
     }
 
@@ -74,8 +64,8 @@ class ClipboardCaptureActivity : Activity() {
         val uris = items.mapNotNull(ClipData.Item::getUri)
 
         when (val kind = ClipboardRules.decide(isSensitive(clip), texts, uris.size)) {
-            ClipKind.Empty -> done(R.string.capture_clipboard_empty)
-            ClipKind.Sensitive -> done(R.string.capture_clipboard_sensitive)
+            ClipKind.Empty -> showFailed(R.string.capture_clipboard_empty)
+            ClipKind.Sensitive -> showFailed(R.string.capture_clipboard_sensitive)
             is ClipKind.Text -> saveText(kind.text)
             // the provider's own type is preferred later; this is only a fallback
             ClipKind.Files -> saveFiles(
@@ -86,10 +76,9 @@ class ClipboardCaptureActivity : Activity() {
     }
 
     private fun saveText(text: String) {
-        val memory = ShareParser.parse(text) ?: return done(R.string.capture_clipboard_empty)
-        val dao = BreadcrumbDatabase.get(this).memoryDao()
-        (application as BreadcrumbApp).applicationScope.launch { dao.upsert(memory) }
-        done(R.string.capture_saved)
+        val memory = ShareParser.parse(text) ?: return showFailed(R.string.capture_clipboard_empty)
+        val write = app.applicationScope.launch { dao.upsert(memory) }
+        showSaved(listOf(memory), attempted = 1, write = write)
     }
 
     /**
@@ -98,22 +87,17 @@ class ClipboardCaptureActivity : Activity() {
      * for a shared file.
      */
     private fun saveFiles(uris: List<Uri>, mime: String?) {
-        val capture = MediaCapture(
-            context = applicationContext,
-            dao = BreadcrumbDatabase.get(this).memoryDao(),
-            store = OriginalStore(applicationContext),
-        )
-        (application as BreadcrumbApp).applicationScope.launch {
+        val capture = MediaCapture(applicationContext, dao, store)
+        app.applicationScope.launch {
             val result = capture.save(uris, mime, sharedText = null, subject = null, source = null)
             withContext(Dispatchers.Main) {
-                done(if (result.saved > 0) R.string.capture_saved else R.string.capture_failed)
+                if (result.saved == 0) {
+                    showFailed(R.string.capture_failed)
+                } else {
+                    showSaved(result.memories, result.attempted)
+                }
             }
         }
-    }
-
-    private fun done(@StringRes message: Int) {
-        Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
-        if (!isFinishing && !isDestroyed) finish()
     }
 
     /**

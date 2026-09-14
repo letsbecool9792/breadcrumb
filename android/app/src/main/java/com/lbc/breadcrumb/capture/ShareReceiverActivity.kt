@@ -1,27 +1,16 @@
 package com.lbc.breadcrumb.capture
 
-import android.app.Activity
 import android.content.Intent
-import android.os.Bundle
-import android.widget.Toast
-import com.lbc.breadcrumb.BreadcrumbApp
 import com.lbc.breadcrumb.R
-import com.lbc.breadcrumb.data.BreadcrumbDatabase
 import kotlinx.coroutines.launch
 
 /**
  * Capture entry point for text. Handles both the share sheet (`ACTION_SEND`)
  * and the text selection toolbar (`ACTION_PROCESS_TEXT`).
- *
- * Plain [Activity], not ComponentActivity: this is a cold-start path that runs
- * on every single save, and it renders nothing. There is no reason to pay for
- * the lifecycle and saved-state machinery to show a toast and finish.
  */
-class ShareReceiverActivity : Activity() {
+class ShareReceiverActivity : CaptureActivity() {
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
+    override fun onCapture() {
         // android-app://com.android.chrome -> com.android.chrome -> "Chrome"
         val source = SourceAppResolver(this).resolve(referrer?.authority)
 
@@ -30,22 +19,11 @@ class ShareReceiverActivity : Activity() {
             subject = intent?.getStringExtra(Intent.EXTRA_SUBJECT),
             sourceApp = source?.packageName,
             sourceAppLabel = source?.label,
-        )
+        ) ?: return showFailed(R.string.capture_nothing)
 
-        if (memory == null) {
-            Toast.makeText(this, R.string.capture_nothing, Toast.LENGTH_SHORT).show()
-        } else {
-            val dao = BreadcrumbDatabase.get(this).memoryDao()
-            (application as BreadcrumbApp).applicationScope.launch { dao.upsert(memory) }
-
-            // Confirmed before the write lands, on purpose -- saving never
-            // blocks (architecture rule 2), and a local Room insert has no
-            // realistic failure this would be hiding.
-            Toast.makeText(this, R.string.capture_saved, Toast.LENGTH_SHORT).show()
-        }
-
-        // The window is never shown (windowNoDisplay), so this must finish here.
-        finish()
+        // Write first; the sheet reports a save already under way.
+        val write = app.applicationScope.launch { dao.upsert(memory) }
+        showSaved(listOf(memory), attempted = 1, write = write)
     }
 
     /**
