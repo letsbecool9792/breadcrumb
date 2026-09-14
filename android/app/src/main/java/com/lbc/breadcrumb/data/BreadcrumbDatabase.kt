@@ -10,8 +10,8 @@ import androidx.room.migration.AutoMigrationSpec
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Memory::class],
-    version = 3,
+    entities = [Memory::class, MemoryFts::class],
+    version = 4,
     exportSchema = true,
     autoMigrations = [
         // v2: hasLink, so a memory can carry a LINK chip beside its primary type
@@ -19,6 +19,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         // v3: sourceAppLabel. No backfill -- a label needs PackageManager, not
         // SQL, and rows without one fall back to showing the package name.
         AutoMigration(from = 2, to = 3),
+        // v4: the full-text search index, filled from the memories already saved
+        AutoMigration(from = 3, to = 4, spec = BreadcrumbDatabase.BuildSearchIndex::class),
     ],
 )
 @TypeConverters(Converters::class)
@@ -39,6 +41,17 @@ abstract class BreadcrumbDatabase : RoomDatabase() {
                     "WHERE rawText LIKE '%http://%' OR rawText LIKE '%https://%' OR rawText LIKE '%www.%'"
             )
             db.execSQL("UPDATE memories SET type = 'LINK' WHERE type = 'TEXT' AND hasLink = 1")
+        }
+    }
+
+    /**
+     * The index's triggers only see writes made after they exist, so without
+     * this every memory saved before v4 would be unsearchable. 'rebuild'
+     * re-reads the whole content table into an external-content FTS index.
+     */
+    class BuildSearchIndex : AutoMigrationSpec {
+        override fun onPostMigrate(db: SupportSQLiteDatabase) {
+            db.execSQL("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
         }
     }
 
