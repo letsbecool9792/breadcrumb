@@ -98,8 +98,10 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 ## Android specifics / known gotchas
 
 - **minSdk 29** (Android 10), target latest. Rationale: the clipboard restriction lands at 29, so a 29 floor means one code path instead of two; scoped storage is mandatory from 29 anyway; device coverage is a non-issue in 2026.
-- **Clipboard cannot be read from a `TileService`.** Android 10+ blocks clipboard access unless the app has focus or is the default IME, and a tile service has neither — you get null. The fix is for the tile to launch a transparent, no-animation Activity that reads the clipboard and finishes immediately.
-- **`TileService.startActivityAndCollapse(Intent)` is deprecated** as of API 34. Use the `PendingIntent` overload.
+- **Clipboard cannot be read from a `TileService`.** Android 10+ blocks clipboard access unless the app has window focus or is the default IME, and a tile service has neither. The tile launches `ClipboardCaptureActivity` instead — but **focus arrives after `onCreate`, so reading there also returns null.** Read in `onWindowFocusChanged(true)`. That in turn rules out `windowNoDisplay` (a window that never shows never gets focus), so it uses the transparent capture theme, with a 2s timeout so a window that never gains focus cannot sit invisibly on top eating touches.
+- **`TileService.startActivityAndCollapse(Intent)` throws `UnsupportedOperationException`** for apps targeting API 34+, not merely deprecated. Use the `PendingIntent` overload on 34+.
+- **Clips marked sensitive are never saved.** Password managers and OTP autofill set `android.content.extra.IS_SENSITIVE` on what they copy; a personal search engine is the last place a password belongs. The key is read on every API level, since copying apps set it regardless of the constant's API 33 introduction.
+- Android 12+ shows its own "Breadcrumb pasted from your clipboard" notice whenever the tile reads the clipboard. Expected, and not something to suppress.
 - **WhatsApp offers no Share on text messages or on link-preview messages** — with or without accompanying text. Only Copy and Forward. No manifest change reaches either; copy → clipboard tile (1.6) is the path. (An earlier note here claimed link previews arrive as `image/jpeg`. That was a misread: the message tested contained a real photo, not a preview card.)
 - **A WhatsApp photo shared with a caption arrives as `image/jpeg` with the caption in `EXTRA_TEXT`.** Saved as an IMAGE with the caption as `rawText`, plus `hasLink` when the caption carries a URL — see the chip model below.
 - **Chip model: one primary `type`, plus a `hasLink` flag.** A file decides the primary type (IMAGE, PDF); otherwise LINK if the text contains a URL; otherwise TEXT. `hasLink` is set whenever shared text contains a URL, so a captioned photo shows IMAGE + LINK chips. LINK is the only kind that combines with another, which is why a single flag is enough rather than a set of types. **Any "link" filter must match `type = LINK OR hasLink`** — filtering on type alone misses every captioned photo and PDF. `hasLink` comes from shared text only, never OCR: a screenshot with a URL bar in it is not a link someone sent.
@@ -172,7 +174,7 @@ breadcrumb/
   README.md
 ```
 
-Icons and the splash asset are **generated, not hand-drawn**. To change the mark, edit the palette/geometry constants at the top of `tools/generate_icons.py` and re-run it — do not edit the PNGs directly, they will be overwritten.
+Icons and the splash asset are **generated, not hand-drawn**. To change the mark, edit the palette/geometry constants at the top of `tools/generate_icons.py` and re-run it — do not edit the PNGs directly, they will be overwritten. The one exception is `res/drawable/ic_tile_crumb.xml`, the Quick Settings tile icon: a hand-built vector, because the system tints tile icons and needs a single-colour shape. Keep it roughly in step with the mark if the mark changes.
 
 Polyglot monorepo — separate toolchains, no shared build system. **Do not add Nx or Turborepo**; there is nothing meaningful to share between Gradle and npm.
 
@@ -236,9 +238,13 @@ Do not start the next step until the current one is ticked. Do not batch several
         works on that path too
       · verified: a Gmail PDF opens in Drive, so sharing it records "from Drive" — accepted as
         correct, since Drive is where it was shared from
-- [ ] **1.6** QS tile → transparent activity → save clipboard
-      · *test:* copy text, pull down Quick Settings, tap tile → row appears
-      · ⚠ this is where the clipboard focus restriction bites — see gotchas above
+- [x] **1.6** QS tile → transparent activity → save clipboard
+      · *test:* `./gradlew testDebugUnitTest` — `ClipboardRulesTest`
+      · verified: copied text → TEXT row, no source; WhatsApp message → saved; text with a
+        link → LINK; Chrome "copy image" → IMAGE row; lock screen → unlock first, then saves
+      · **not verified on device:** the sensitive-clip skip. No password manager to test with,
+        so it rests on `ClipboardRulesTest` alone. Worth a real check if one is ever installed.
+      · tapping twice saves the clipboard twice. Accepted — no duplicate detection wanted
 - [ ] **1.7** Replace the capture toast with the designed capture sheet
       · board 4 of the design canvas: sheet over the host app, crumb drop, undo
       · `Theme.Breadcrumb.Capture` drops `windowNoDisplay` and becomes a real
