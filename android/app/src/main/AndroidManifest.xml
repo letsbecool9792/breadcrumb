@@ -2,6 +2,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Makes launchable apps visible, so a capture can record its source
+         app's name. Without this, Android 11+ hides most packages: WhatsApp
+         only became visible by granting access to a shared file, and Chrome,
+         sharing plain text, was not visible at all (checked with
+         dumpsys package queries). Launcher-intent queries cover every app a
+         person could have shared from, without the policy-restricted
+         QUERY_ALL_PACKAGES permission. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:name=".BreadcrumbApp"
         android:allowBackup="true"
