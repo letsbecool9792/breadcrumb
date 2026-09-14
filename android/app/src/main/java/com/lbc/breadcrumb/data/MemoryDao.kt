@@ -52,6 +52,32 @@ interface MemoryDao {
     @Query("SELECT * FROM memories WHERE type = :type ORDER BY capturedAt DESC")
     suspend fun getByType(type: MemoryType): List<Memory>
 
+    /**
+     * Images whose text has not been read yet, newest first, so the one just
+     * saved is read ahead of any backlog.
+     *
+     * @param exclude ids to pass over -- reads that already failed this run.
+     */
+    @Query(
+        "SELECT * FROM memories WHERE type = 'IMAGE' AND extractedText IS NULL " +
+            "AND id NOT IN (:exclude) ORDER BY capturedAt DESC LIMIT :limit"
+    )
+    suspend fun unreadImages(exclude: List<String>, limit: Int): List<Memory>
+
+    @Query("SELECT COUNT(*) FROM memories WHERE type = 'IMAGE' AND extractedText IS NULL")
+    fun observeUnreadImageCount(): Flow<Int>
+
+    /**
+     * An UPDATE rather than an upsert of the whole row: it cannot bring back a
+     * memory deleted while its image was being read, nor overwrite columns
+     * written in the meantime. It also only fills text that is still unread.
+     */
+    @Query(
+        "UPDATE memories SET extractedText = :text, updatedAt = :now " +
+            "WHERE id = :id AND extractedText IS NULL"
+    )
+    suspend fun setExtractedText(id: String, text: String, now: Long)
+
     @Query("DELETE FROM memories")
     suspend fun clear()
 }

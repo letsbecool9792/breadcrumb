@@ -76,7 +76,12 @@ data class Memory(
     /** App-private copy of the original file, for image/pdf/audio. */
     val localUri: String? = null,
 
-    /** Filled by on-device ML Kit OCR (step 2.1). */
+    /**
+     * Text read out of an image by on-device OCR (step 2.1). Null until the
+     * image has been read; empty once it has, and held no text. That
+     * difference is how [com.lbc.breadcrumb.ocr.OcrQueue] tells which images
+     * are still to read.
+     */
     val extractedText: String? = null,
 
     /**

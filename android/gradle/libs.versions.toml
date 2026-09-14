@@ -15,6 +15,9 @@ coreSplashscreen = "1.0.1"
 # register generated sources via the kotlin.sourceSets DSL, which AGP 9 rejects.
 ksp = "2.3.12"
 room = "2.8.5"
+# The bundled model, not play-services-mlkit-text-recognition: that one fetches
+# its model on first use, so OCR would not work offline until it had.
+mlkitTextRecognition = "16.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -37,6 +40,7 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 # room-ktx was folded into room-runtime in 2.5.0, so it is not listed here
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
