@@ -1,6 +1,7 @@
 package com.lbc.breadcrumb.ui.debug
 
 import android.text.format.DateUtils
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,9 +30,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -40,6 +45,8 @@ import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.SyncState
 import com.lbc.breadcrumb.ui.theme.BreadcrumbTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Temporary. Exists so saves are visible while the capture surfaces are built
@@ -134,7 +141,9 @@ private fun MemoryRow(memory: Memory, onDelete: () -> Unit) {
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TypeChip(memory.type)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    memory.chips.forEach { TypeChip(it) }
+                }
                 Spacer(Modifier.size(8.dp))
                 Text(
                     text = DateUtils.getRelativeTimeSpanString(
@@ -155,6 +164,28 @@ private fun MemoryRow(memory: Memory, onDelete: () -> Unit) {
 
             Spacer(Modifier.size(6.dp))
 
+            val context = LocalContext.current
+            val preview by produceState<OriginalPreview?>(null, memory.id, memory.localUri) {
+                value = if (memory.localUri == null) {
+                    null
+                } else {
+                    withContext(Dispatchers.IO) { loadOriginalPreview(context, memory) }
+                }
+            }
+
+            preview?.thumbnail?.let { thumb ->
+                Image(
+                    bitmap = thumb,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 180.dp)
+                        .clip(RoundedCornerShape(6.dp)),
+                )
+                Spacer(Modifier.size(8.dp))
+            }
+
             Text(
                 text = memory.searchableText.ifBlank { "(no text)" },
                 style = MaterialTheme.typography.bodyMedium,
@@ -162,10 +193,23 @@ private fun MemoryRow(memory: Memory, onDelete: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
 
-            memory.sourceApp?.let { source ->
+            // Debug-only facts that prove capture worked: provenance, the stored
+            // file and its size, and the content's own creation date.
+            val facts = listOfNotNull(
+                memory.sourceApp?.let { "from $it" },
+                preview?.label,
+                memory.contentCreatedAt?.let {
+                    "taken " + DateUtils.formatDateTime(
+                        context,
+                        it,
+                        DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH or DateUtils.FORMAT_SHOW_YEAR,
+                    )
+                },
+            )
+            if (facts.isNotEmpty()) {
                 Spacer(Modifier.size(6.dp))
                 Text(
-                    text = "from $source",
+                    text = facts.joinToString("  ·  "),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
