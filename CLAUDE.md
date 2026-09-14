@@ -117,6 +117,11 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **OCR uses ML Kit's bundled model** (`com.google.mlkit:text-recognition`), not `play-services-mlkit-text-recognition`, which downloads its model on first use and so is not offline from the first save. Gradle fetches the model from Google's Maven at build time and packs it into the APK; nothing is checked in. The cost is APK size: its native library is ~11 MB per ABI, ~41 MB across all four, of which x86/x86_64 serve only emulators. The arm64 library is 16 KB page-aligned (checked from its ELF headers).
 - **`extractedText`: null means not read yet, empty means read and holding no text.** `OcrQueue` finds its work by that null, so never write empty to mean anything else, and resetting a row to null queues it to be read again.
 - **Nothing calls OCR.** `OcrQueue` starts in `BreadcrumbApp.onCreate` — every process, capture included — and watches Room for unread images. Any code that inserts IMAGE rows, the 5.1 importer included, gets them read without doing anything.
+- **ML Kit reports usage to Google — accepted, 2026-09-15.** Its logging queue shows up as `databases/com.google.android.datatransport.events` in app storage. What it sends is SDK usage and performance data, not images or recognized text, so rule 1's stance holds: originals and their text stay on the device. Accepted rather than stripped, since removing the transport service by manifest merge is unsupported and could break on an ML Kit update. Revisit if the privacy stance tightens.
+- **Upsert with `@Upsert`, never `@Insert(onConflict = REPLACE)`.** `memories_fts` is an external-content index kept in step by triggers, and REPLACE deletes the old row without firing delete triggers — the old text would stay searchable. `MemorySearchTest` covers it.
+- **Search input always goes through `FtsQuery.matchExpression`**, never straight into MATCH: raw input containing `"`, `-`, `OR` or `column:` is a syntax error or means something else. FTS4 (Room supports no FTS5) has no ranking function, so local results are newest first.
+- **An AutoMigration that adds or changes the FTS table does not index existing rows.** Room recreates the sync triggers after migrating, but the triggers only see later writes. v3 → v4 rebuilds the index in its spec (`BuildSearchIndex`); any future change to the FTS columns needs the same.
+- **Back up the phone's database before installing a schema bump.** `adb exec-out run-as com.lbc.breadcrumb cat databases/breadcrumb.db > breadcrumb.db`, and the same for `-wal` and `-shm` — the WAL holds recent writes. A failed migration rolls back rather than wiping, but real saved memories are not worth the bet.
 - **Cleartext HTTP is blocked by default** since Android 9. Local dev against `adb reverse` needs a network security config permitting cleartext to `localhost` — scoped to the **debug** build type only, never release.
 - Android Studio should open **`android/`** as the project root, not the repo root. Opening the repo root confuses Gradle sync.
 - **compileSdk is 36.1 and only android-30/34/35/36/36.1 are installed.** Some androidx libraries now require compileSdk 37 (lifecycle 2.11.0 does; 2.10.0 does not). Prefer pinning the library back over pulling down another SDK platform unless the newer version is actually needed — disk on this machine is tight.
@@ -283,8 +288,15 @@ Do not start the next step until the current one is ticked. Do not batch several
         animates as before
       · open: Latin script only. And nothing in V1 reads a **PDF's contents** — 2.1 and 3.6 are
         images only — so a PDF is findable by filename alone until that is decided
-- [~] **2.2** Room FTS index + local keyword search
+- [x] **2.2** Room FTS index + local keyword search
+      · *test:* `./gradlew testDebugUnitTest` — `FtsQueryTest` (words become quoted prefix terms)
+      · *test:* on-device `MemorySearchTest` — OCR-only words, prefixes, every word must match,
+        case and accent folding on the device's SQLite, FTS syntax in the input, and the index
+        following insert, update, upsert, delete and clear
       · *test:* search a word that appears only inside a screenshot
+      · verified on device: installed over the real v3 database — all 32 memories indexed, all
+        four sync triggers present (checked from a pulled copy)
+      · search field on the debug list, results newest first; ranking waits for 4.4
 
 ### Phase 3 — Backend + ingest
 
