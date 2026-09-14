@@ -18,11 +18,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,12 +42,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.lbc.breadcrumb.data.FtsQuery
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.SyncState
@@ -56,7 +62,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * Temporary. Exists so saves are visible while the capture surfaces are built
- * in phase 1; the real search-first UI replaces it at step 4.2.
+ * in phase 1, and so local search (2.2) can be tried; the real search-first UI
+ * replaces it at step 4.2.
  *
  * Uses text glyphs rather than Material icons on purpose -- a throwaway screen
  * is not worth an extra dependency.
@@ -65,35 +72,46 @@ import kotlinx.coroutines.withContext
 @Composable
 fun MemoryListScreen(viewModel: MemoryListViewModel = viewModel()) {
     val memories by viewModel.memories.collectAsStateWithLifecycle()
+    val searching = FtsQuery.matchExpression(viewModel.query) != null
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Breadcrumb", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            text = if (memories.isEmpty()) {
-                                "debug · no memories"
-                            } else {
-                                "debug · ${memories.size} memories"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                actions = {
-                    if (memories.isNotEmpty()) {
-                        TextButton(onClick = { viewModel.clearAll() }) {
-                            Text("Clear")
+            Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("Breadcrumb", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = when {
+                                    searching -> "debug · ${memories.size} matching"
+                                    memories.isEmpty() -> "debug · no memories"
+                                    else -> "debug · ${memories.size} memories"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
-            )
+                    },
+                    actions = {
+                        // hidden while searching, where it would read as "clear these results"
+                        if (memories.isNotEmpty() && !searching) {
+                            TextButton(onClick = { viewModel.clearAll() }) {
+                                Text("Clear")
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                    ),
+                )
+                SearchField(
+                    query = viewModel.query,
+                    onQueryChange = viewModel::onQueryChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                )
+            }
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { viewModel.addSample() }) {
@@ -102,7 +120,7 @@ fun MemoryListScreen(viewModel: MemoryListViewModel = viewModel()) {
         },
     ) { padding ->
         if (memories.isEmpty()) {
-            EmptyState(Modifier.padding(padding))
+            if (searching) NoMatches(Modifier.padding(padding)) else EmptyState(Modifier.padding(padding))
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -130,6 +148,45 @@ private fun EmptyState(modifier: Modifier = Modifier) {
             Spacer(Modifier.size(4.dp))
             Text(
                 "Tap + to drop a sample crumb",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Local keyword search (step 2.2). Matches whole words and word beginnings in
+ * titles, shared text and text read from images; ranked search is step 4.2's.
+ */
+@Composable
+private fun SearchField(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    val keyboard = LocalSoftwareKeyboardController.current
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        placeholder = { Text("Search saved text") },
+        singleLine = true,
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                TextButton(onClick = { onQueryChange("") }) { Text("✕") }
+            }
+        },
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        // results are already live; the key only needs to get the keyboard out of the way
+        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun NoMatches(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Nothing matches", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.size(4.dp))
+            Text(
+                "Searches titles, shared text and text read from images",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
