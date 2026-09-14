@@ -1,5 +1,6 @@
 package com.lbc.breadcrumb.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -25,7 +26,24 @@ data class Memory(
      */
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
 
+    /**
+     * The primary kind -- what the memory *is*, and so what its tile looks
+     * like. A file decides it (IMAGE, PDF); otherwise LINK when the text
+     * carries a URL; otherwise TEXT.
+     */
     val type: MemoryType,
+
+    /**
+     * True when the shared text carries a URL, whatever the primary type. This
+     * is what lets a photo sent with a link wear both an IMAGE and a LINK chip,
+     * and what a "that link" search must filter on -- `type = LINK` alone
+     * misses every captioned photo and PDF.
+     *
+     * Set from shared text only, never from OCR: a screenshot with a URL bar in
+     * it is not a link someone sent.
+     */
+    @ColumnInfo(defaultValue = "0")
+    val hasLink: Boolean = false,
 
     /** When the user saved it. */
     val capturedAt: Long = System.currentTimeMillis(),
@@ -73,6 +91,10 @@ data class Memory(
         get() = listOfNotNull(title, summary, rawText, extractedText)
             .filter { it.isNotBlank() }
             .joinToString("\n")
+
+    /** Primary type first, then LINK when a link rides along with something else. */
+    val chips: List<MemoryType>
+        get() = if (hasLink && type != MemoryType.LINK) listOf(type, MemoryType.LINK) else listOf(type)
 }
 
 enum class MemoryType {

@@ -1,5 +1,6 @@
 package com.lbc.breadcrumb.ui.debug
 
+import com.lbc.breadcrumb.capture.UrlText
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.SyncState
@@ -58,8 +59,11 @@ private val samples: List<Memory> = listOf(
 fun randomSampleMemory(): Memory {
     val daysAgo = Random.nextInt(0, 90)
     val capturedAt = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(daysAgo.toLong())
-    return samples.random().copy(
+    val sample = samples.random()
+    return sample.copy(
         id = java.util.UUID.randomUUID().toString(),
+        // derived the same way capture derives it, so samples chip like real saves
+        hasLink = UrlText.containsUrl(sample.rawText),
         capturedAt = capturedAt,
         contentCreatedAt = capturedAt,
         updatedAt = capturedAt,

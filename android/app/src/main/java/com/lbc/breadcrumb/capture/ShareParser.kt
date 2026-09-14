@@ -11,14 +11,6 @@ import com.lbc.breadcrumb.data.MemoryType
  */
 object ShareParser {
 
-    /**
-     * Matches only when the *entire* shared body is one URL. Prose that merely
-     * contains a link stays TEXT -- "have a look at https://..." is a message,
-     * and throwing away the message to keep the URL loses the part that made it
-     * worth saving.
-     */
-    private val SINGLE_URL = Regex("""^(https?://|www\.)\S+$""", RegexOption.IGNORE_CASE)
-
     fun parse(
         text: String?,
         subject: String? = null,
@@ -28,12 +20,18 @@ object ShareParser {
         val body = text?.trim().orEmpty()
         if (body.isEmpty()) return null
 
+        // Text with a URL anywhere in it is a LINK. The whole message is kept
+        // as rawText regardless, so nothing the sender wrote around the link
+        // is lost by calling it one.
+        val hasLink = UrlText.containsUrl(body)
+
         // Chrome sends the page title as the subject and the URL as the text.
         // Messaging apps usually send no subject, or echo the body into it.
         val shareTitle = subject?.trim()?.takeIf { it.isNotEmpty() && it != body }
 
         return Memory(
-            type = if (SINGLE_URL.matches(body)) MemoryType.LINK else MemoryType.TEXT,
+            type = if (hasLink) MemoryType.LINK else MemoryType.TEXT,
+            hasLink = hasLink,
             capturedAt = now,
             updatedAt = now,
             sourceApp = sourceApp,

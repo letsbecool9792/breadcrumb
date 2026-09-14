@@ -40,6 +40,7 @@ class MemoryDaoTest {
         val memory = Memory(
             id = "test-1",
             type = MemoryType.IMAGE,
+            hasLink = true,
             capturedAt = 1_700_000_000_000,
             contentCreatedAt = 1_690_000_000_000,
             sourceApp = "com.whatsapp",

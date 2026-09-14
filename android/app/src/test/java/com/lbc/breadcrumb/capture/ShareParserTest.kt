@@ -3,7 +3,9 @@ package com.lbc.breadcrumb.capture
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.SyncState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -17,6 +19,7 @@ class ShareParserTest {
         val memory = ShareParser.parse("https://github.com/square/okhttp")!!
 
         assertEquals(MemoryType.LINK, memory.type)
+        assertTrue(memory.hasLink)
         assertEquals("https://github.com/square/okhttp", memory.rawText)
     }
 
@@ -26,28 +29,29 @@ class ShareParserTest {
     }
 
     @Test
-    fun `prose containing a url stays TEXT`() {
-        // Throwing away the message to keep the URL loses the part that made it
-        // worth saving.
+    fun `prose containing a url is a LINK and keeps the whole message`() {
         val shared = "have a look at https://developer.android.com when you get a sec"
         val memory = ShareParser.parse(shared)!!
 
-        assertEquals(MemoryType.TEXT, memory.type)
+        assertEquals(MemoryType.LINK, memory.type)
+        assertTrue(memory.hasLink)
+        // calling it a link loses nothing the sender wrote around it
         assertEquals(shared, memory.rawText)
     }
 
     @Test
-    fun `two urls are TEXT, not a link`() {
+    fun `text with several urls is a LINK`() {
         val shared = "https://a.example.com https://b.example.com"
 
-        assertEquals(MemoryType.TEXT, ShareParser.parse(shared)!!.type)
+        assertEquals(MemoryType.LINK, ShareParser.parse(shared)!!.type)
     }
 
     @Test
-    fun `plain text is TEXT`() {
+    fun `plain text is TEXT with no link`() {
         val memory = ShareParser.parse("Naru's in Indiranagar, book two weeks ahead")!!
 
         assertEquals(MemoryType.TEXT, memory.type)
+        assertFalse(memory.hasLink)
     }
 
     @Test
