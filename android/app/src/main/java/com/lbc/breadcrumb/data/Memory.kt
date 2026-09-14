@@ -55,8 +55,20 @@ data class Memory(
      */
     val contentCreatedAt: Long? = null,
 
-    /** Package name of the app that shared it, via Activity.getReferrer(). */
+    /**
+     * Package name of the app it came from, via Activity.getReferrer(). Null
+     * when unknown, or when the referrer was a system surface (the clipboard,
+     * the share chooser) rather than a real source.
+     */
     val sourceApp: String? = null,
+
+    /**
+     * The source app's name as a person would say it -- "WhatsApp", not
+     * "com.whatsapp". Resolved and stored at capture, so it survives the app
+     * being uninstalled. This is what a "from WhatsApp" search matches against;
+     * it is a filter, and deliberately not part of [searchableText].
+     */
+    val sourceAppLabel: String? = null,
 
     /** Shared text, URL, or clipboard content. */
     val rawText: String? = null,

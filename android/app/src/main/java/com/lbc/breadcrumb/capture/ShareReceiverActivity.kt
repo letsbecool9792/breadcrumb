@@ -22,11 +22,14 @@ class ShareReceiverActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // android-app://com.android.chrome -> com.android.chrome -> "Chrome"
+        val source = SourceAppResolver(this).resolve(referrer?.authority)
+
         val memory = ShareParser.parse(
             text = sharedText(intent),
             subject = intent?.getStringExtra(Intent.EXTRA_SUBJECT),
-            // android-app://com.android.chrome -> com.android.chrome
-            sourceApp = referrer?.authority,
+            sourceApp = source?.packageName,
+            sourceAppLabel = source?.label,
         )
 
         if (memory == null) {

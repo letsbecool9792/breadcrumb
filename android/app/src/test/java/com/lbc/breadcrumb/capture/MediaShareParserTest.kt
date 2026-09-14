@@ -166,12 +166,18 @@ class MediaShareParserTest {
     @Test
     fun `the draft becomes a pending memory pointing at its stored file`() {
         val memory = plan(mime = "image/png", text = "https://x.com", createdAt = 1_690_000_000_000)!!
-            .toMemory(localUri = "file:///x/fixed-id.png", sourceApp = "com.whatsapp", now = 1_700_000_000_000)
+            .toMemory(
+                localUri = "file:///x/fixed-id.png",
+                sourceApp = "com.whatsapp",
+                sourceAppLabel = "WhatsApp",
+                now = 1_700_000_000_000,
+            )
 
         assertEquals("fixed-id", memory.id)
         assertTrue(memory.hasLink)
         assertEquals("file:///x/fixed-id.png", memory.localUri)
         assertEquals("com.whatsapp", memory.sourceApp)
+        assertEquals("WhatsApp", memory.sourceAppLabel)
         assertEquals(1_700_000_000_000, memory.capturedAt)
         assertEquals(1_690_000_000_000, memory.contentCreatedAt)
         assertEquals(SyncState.PENDING, memory.syncState)

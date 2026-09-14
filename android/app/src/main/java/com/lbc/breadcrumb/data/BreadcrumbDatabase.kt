@@ -11,11 +11,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Memory::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
     autoMigrations = [
         // v2: hasLink, so a memory can carry a LINK chip beside its primary type
         AutoMigration(from = 1, to = 2, spec = BreadcrumbDatabase.BackfillHasLink::class),
+        // v3: sourceAppLabel. No backfill -- a label needs PackageManager, not
+        // SQL, and rows without one fall back to showing the package name.
+        AutoMigration(from = 2, to = 3),
     ],
 )
 @TypeConverters(Converters::class)

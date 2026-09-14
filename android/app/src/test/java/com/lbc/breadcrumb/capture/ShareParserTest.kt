@@ -96,10 +96,15 @@ class ShareParserTest {
     }
 
     @Test
-    fun `the source app is recorded`() {
-        val memory = ShareParser.parse(text = "hello", sourceApp = "com.whatsapp")!!
+    fun `the source app and its name are recorded`() {
+        val memory = ShareParser.parse(
+            text = "hello",
+            sourceApp = "com.whatsapp",
+            sourceAppLabel = "WhatsApp",
+        )!!
 
         assertEquals("com.whatsapp", memory.sourceApp)
+        assertEquals("WhatsApp", memory.sourceAppLabel)
     }
 
     @Test

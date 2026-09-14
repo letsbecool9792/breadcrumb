@@ -196,7 +196,8 @@ private fun MemoryRow(memory: Memory, onDelete: () -> Unit) {
             // Debug-only facts that prove capture worked: provenance, the stored
             // file and its size, and the content's own creation date.
             val facts = listOfNotNull(
-                memory.sourceApp?.let { "from $it" },
+                // label first; the package only for rows captured before v3
+                (memory.sourceAppLabel ?: memory.sourceApp)?.let { "from $it" },
                 preview?.label,
                 memory.contentCreatedAt?.let {
                     "taken " + DateUtils.formatDateTime(

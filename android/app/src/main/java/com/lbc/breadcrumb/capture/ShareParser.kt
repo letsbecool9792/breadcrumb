@@ -15,6 +15,7 @@ object ShareParser {
         text: String?,
         subject: String? = null,
         sourceApp: String? = null,
+        sourceAppLabel: String? = null,
         now: Long = System.currentTimeMillis(),
     ): Memory? {
         val body = text?.trim().orEmpty()
@@ -35,6 +36,7 @@ object ShareParser {
             capturedAt = now,
             updatedAt = now,
             sourceApp = sourceApp,
+            sourceAppLabel = sourceAppLabel,
             rawText = body,
             title = shareTitle,
         )

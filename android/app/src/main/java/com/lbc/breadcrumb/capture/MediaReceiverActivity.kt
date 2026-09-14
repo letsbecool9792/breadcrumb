@@ -50,11 +50,11 @@ class MediaReceiverActivity : Activity() {
         val sharedText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
         val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT)
         val intentType = intent.type
-        // android-app://com.whatsapp -> com.whatsapp
-        val sourceApp = referrer?.authority
+        // android-app://com.whatsapp -> com.whatsapp -> "WhatsApp"
+        val source = SourceAppResolver(this).resolve(referrer?.authority)
 
         (application as BreadcrumbApp).applicationScope.launch {
-            val result = capture.save(uris, intentType, sharedText, subject, sourceApp)
+            val result = capture.save(uris, intentType, sharedText, subject, source)
 
             withContext(Dispatchers.Main) {
                 Toast.makeText(applicationContext, message(result), Toast.LENGTH_SHORT).show()

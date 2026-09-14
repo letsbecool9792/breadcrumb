@@ -44,6 +44,7 @@ class MemoryDaoTest {
             capturedAt = 1_700_000_000_000,
             contentCreatedAt = 1_690_000_000_000,
             sourceApp = "com.whatsapp",
+            sourceAppLabel = "WhatsApp",
             rawText = "shared caption",
             localUri = "file:///data/user/0/com.lbc.breadcrumb/files/img.jpg",
             extractedText = "Qualcomm SWE Internship",

@@ -20,6 +20,7 @@ private val samples: List<Memory> = listOf(
     Memory(
         type = MemoryType.IMAGE,
         sourceApp = "com.linkedin.android",
+        sourceAppLabel = "LinkedIn",
         rawText = "Qualcomm SWE internship, applications close April 30",
         localUri = "file:///sample/internship.png",
         extractedText = "Qualcomm | Software Engineering Intern | Bengaluru",
@@ -27,27 +28,32 @@ private val samples: List<Memory> = listOf(
     Memory(
         type = MemoryType.LINK,
         sourceApp = "com.android.chrome",
+        sourceAppLabel = "Chrome",
         rawText = "https://github.com/square/okhttp",
     ),
     Memory(
         type = MemoryType.TEXT,
         sourceApp = "com.whatsapp",
+        sourceAppLabel = "WhatsApp",
         rawText = "Naru's in Indiranagar — the omakase, book two weeks ahead",
     ),
     Memory(
         type = MemoryType.PDF,
         sourceApp = "com.google.android.gm",
+        sourceAppLabel = "Gmail",
         rawText = "Distributed Systems — week 6 notes",
         localUri = "file:///sample/ds-week6.pdf",
     ),
     Memory(
         type = MemoryType.TEXT,
         sourceApp = "com.instagram.android",
+        sourceAppLabel = "Instagram",
         rawText = "Kyoto in November for the maples, not spring — half the crowd",
     ),
     Memory(
         type = MemoryType.LINK,
         sourceApp = "com.android.chrome",
+        sourceAppLabel = "Chrome",
         rawText = "https://developer.android.com/develop/ui/compose/performance",
     ),
 )

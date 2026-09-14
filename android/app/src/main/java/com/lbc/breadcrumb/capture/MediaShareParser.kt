@@ -26,13 +26,19 @@ data class MediaDraft(
     val rawText: String?,
     val contentCreatedAt: Long?,
 ) {
-    fun toMemory(localUri: String, sourceApp: String?, now: Long): Memory = Memory(
+    fun toMemory(
+        localUri: String,
+        sourceApp: String?,
+        now: Long,
+        sourceAppLabel: String? = null,
+    ): Memory = Memory(
         id = id,
         type = type,
         hasLink = hasLink,
         capturedAt = now,
         contentCreatedAt = contentCreatedAt,
         sourceApp = sourceApp,
+        sourceAppLabel = sourceAppLabel,
         rawText = rawText,
         localUri = localUri,
         title = title,

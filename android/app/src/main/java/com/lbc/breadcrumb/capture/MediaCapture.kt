@@ -28,7 +28,7 @@ class MediaCapture(
         intentType: String?,
         sharedText: String?,
         subject: String?,
-        sourceApp: String?,
+        source: Provenance?,
         now: Long = System.currentTimeMillis(),
     ): CaptureResult {
         val accepted = uris.filter { MediaShareParser.isAcceptableScheme(it.scheme) }
@@ -52,8 +52,12 @@ class MediaCapture(
             }
 
             val createdAt = draft.contentCreatedAt ?: exifDate(file, draft.type)
-            val memory = draft.copy(contentCreatedAt = createdAt)
-                .toMemory(store.uriFor(file), sourceApp, now)
+            val memory = draft.copy(contentCreatedAt = createdAt).toMemory(
+                localUri = store.uriFor(file),
+                sourceApp = source?.packageName,
+                sourceAppLabel = source?.label,
+                now = now,
+            )
 
             try {
                 dao.upsert(memory)
