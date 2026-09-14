@@ -40,10 +40,9 @@
 
                 <category android:name="android.intent.category.DEFAULT" />
 
-                <!-- text/html too: apps sharing a link with its preview card
-                     often send rich text rather than text/plain, which is why
-                     a WhatsApp link-preview share did not offer Breadcrumb.
-                     EXTRA_TEXT still carries the plain fallback. -->
+                <!-- text/html too: some apps share rich text for links.
+                     Cheap to accept, and EXTRA_TEXT still carries the plain
+                     fallback that is actually read. -->
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="text/html" />
             </intent-filter>
@@ -56,6 +55,27 @@
                 <category android:name="android.intent.category.DEFAULT" />
 
                 <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <!-- Images and PDFs, one or many. A photo shared with a caption
+             arrives here too, with the caption in EXTRA_TEXT. -->
+        <activity
+            android:name=".capture.MediaReceiverActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/app_name"
+            android:theme="@style/Theme.Breadcrumb.CaptureTranslucent">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="image/*" />
+                <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
     </application>

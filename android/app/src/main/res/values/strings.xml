@@ -1,5 +1,8 @@
 <resources>
     <string name="app_name">Breadcrumb</string>
     <string name="capture_saved">Saved</string>
+    <string name="capture_saved_count">Saved %1$d</string>
+    <string name="capture_saved_partial">Saved %1$d of %2$d</string>
+    <string name="capture_failed">Couldn\'t save that</string>
     <string name="capture_nothing">Nothing to save</string>
 </resources>

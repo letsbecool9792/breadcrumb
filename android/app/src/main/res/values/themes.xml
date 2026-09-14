@@ -19,4 +19,11 @@
         <item name="android:windowNoDisplay">true</item>
         <item name="android:windowAnimationStyle">@null</item>
     </style>
+
+    <!-- For capture surfaces that must outlive onCreate, such as copying a
+         shared file while its read grant is still held. A real window, but a
+         fully transparent one with no animation, so it is still invisible. -->
+    <style name="Theme.Breadcrumb.CaptureTranslucent" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>
