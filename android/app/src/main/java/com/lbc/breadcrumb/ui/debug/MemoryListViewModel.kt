@@ -1,18 +1,23 @@
 package com.lbc.breadcrumb.ui.debug
 
 import android.app.Application
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.lbc.breadcrumb.BreadcrumbApp
+import com.lbc.breadcrumb.BuildConfig
 import com.lbc.breadcrumb.data.BreadcrumbDatabase
 import com.lbc.breadcrumb.data.FtsQuery
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.OriginalStore
+import com.lbc.breadcrumb.net.ServerStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -55,6 +60,26 @@ class MemoryListViewModel(app: Application) : AndroidViewModel(app) {
         query = text
     }
 
+    private val server = (app as BreadcrumbApp).server
+    private var serverCheck: Job? = null
+
+    var serverStatus by mutableStateOf<ServerStatus>(ServerStatus.Checking)
+        private set
+
+    init {
+        checkServer()
+    }
+
+    /** On launch, and again on tap -- adb reverse drops whenever the phone reconnects. */
+    fun checkServer() {
+        if (serverCheck?.isActive == true) return
+        serverCheck = viewModelScope.launch {
+            serverStatus = ServerStatus.Checking
+            serverStatus = server.health()
+            Log.i(TAG, "server ${BuildConfig.SERVER_URL}: $serverStatus")
+        }
+    }
+
     fun addSample() = viewModelScope.launch {
         dao.upsert(randomSampleMemory())
     }
@@ -72,5 +97,9 @@ class MemoryListViewModel(app: Application) : AndroidViewModel(app) {
     fun clearAll() = viewModelScope.launch(Dispatchers.IO) {
         dao.clear()
         store.clear()
+    }
+
+    private companion object {
+        const val TAG = "MemoryList"
     }
 }

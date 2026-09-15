@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- The backend. Capture never waits on it (architecture rule 2). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Makes launchable apps visible, so a capture can record its source
          app's name. Without this, Android 11+ hides most packages: WhatsApp
          only became visible by granting access to a shared file, and Chrome,

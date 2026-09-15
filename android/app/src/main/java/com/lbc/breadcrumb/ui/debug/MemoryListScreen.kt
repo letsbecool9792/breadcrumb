@@ -3,6 +3,7 @@ package com.lbc.breadcrumb.ui.debug
 import android.text.format.DateUtils
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,10 +51,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.lbc.breadcrumb.BuildConfig
 import com.lbc.breadcrumb.data.FtsQuery
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.SyncState
+import com.lbc.breadcrumb.net.ServerStatus
 import com.lbc.breadcrumb.ui.common.OriginalPreview
 import com.lbc.breadcrumb.ui.common.loadOriginalPreview
 import com.lbc.breadcrumb.ui.theme.BreadcrumbTheme
@@ -104,6 +107,13 @@ fun MemoryListScreen(viewModel: MemoryListViewModel = viewModel()) {
                         containerColor = MaterialTheme.colorScheme.surface,
                     ),
                 )
+                ServerStatusLine(
+                    status = viewModel.serverStatus,
+                    onRecheck = viewModel::checkServer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                )
                 SearchField(
                     query = viewModel.query,
                     onQueryChange = viewModel::onQueryChange,
@@ -153,6 +163,28 @@ private fun EmptyState(modifier: Modifier = Modifier) {
             )
         }
     }
+}
+
+/** Whether the backend answers (step 3.1). Tap to check again. */
+@Composable
+private fun ServerStatusLine(status: ServerStatus, onRecheck: () -> Unit, modifier: Modifier = Modifier) {
+    val server = BuildConfig.SERVER_URL.substringAfter("://")
+    val (text, color) = when (status) {
+        ServerStatus.Checking -> "server · $server · checking…" to MaterialTheme.colorScheme.onSurfaceVariant
+        ServerStatus.Reachable -> "server · $server · reachable" to MaterialTheme.colorScheme.primary
+        is ServerStatus.Unreachable ->
+            "server · $server · unreachable: ${status.reason}" to MaterialTheme.colorScheme.error
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(onClick = onRecheck),
+    )
 }
 
 /**

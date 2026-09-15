@@ -3,6 +3,7 @@ package com.lbc.breadcrumb
 import android.app.Application
 import com.lbc.breadcrumb.data.BreadcrumbDatabase
 import com.lbc.breadcrumb.data.OriginalStore
+import com.lbc.breadcrumb.net.ServerClient
 import com.lbc.breadcrumb.ocr.MlKitOcrReader
 import com.lbc.breadcrumb.ocr.OcrQueue
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +22,9 @@ class BreadcrumbApp : Application() {
      * cannot take the scope down with it.
      */
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Lazy: a capture process never talks to the server, so never builds a client. */
+    val server: ServerClient by lazy { ServerClient(BuildConfig.SERVER_URL) }
 
     override fun onCreate() {
         super.onCreate()
