@@ -124,7 +124,7 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **Back up the phone's database before installing a schema bump.** `adb exec-out run-as com.lbc.breadcrumb cat databases/breadcrumb.db > breadcrumb.db`, and the same for `-wal` and `-shm` — the WAL holds recent writes. A failed migration rolls back rather than wiping, but real saved memories are not worth the bet.
 - **Cleartext HTTP is blocked by default** since Android 9. Local dev against `adb reverse` needs a network security config permitting cleartext to `localhost` — scoped to the **debug** build type only, never release.
 - Android Studio should open **`android/`** as the project root, not the repo root. Opening the repo root confuses Gradle sync.
-- **compileSdk is 36.1 and only android-30/34/35/36/36.1 are installed.** Some androidx libraries now require compileSdk 37 (lifecycle 2.11.0 does; 2.10.0 does not). Prefer pinning the library back over pulling down another SDK platform unless the newer version is actually needed — disk on this machine is tight.
+- **compileSdk is 36.1 and only android-30/34/35/36/36.1 are installed.** Some libraries now require compileSdk 37 (lifecycle 2.11.0 does, 2.10.0 does not; OkHttp 5.5.0 does, 5.4.0 does not — read `minCompileSdk` from the AAR's `aar-metadata.properties` to check). Prefer pinning the library back over pulling down another SDK platform unless the newer version is actually needed — disk on this machine is tight.
 - **AGP 9 compiles Kotlin itself** (built-in Kotlin), which is why there is no `org.jetbrains.kotlin.android` plugin here. Consequence: KSP must be **2.3.1 or newer** — the older `<kotlin>-<ksp>` versions register generated sources through the `kotlin.sourceSets` DSL and AGP 9 rejects that at configuration time. Do **not** fix it with `android.disallowKotlinSourceSets=false`; Google explicitly advises against that flag. Bump KSP instead.
 
 ---
@@ -138,6 +138,23 @@ adb reverse tcp:3000 tcp:3000
 ```
 
 The device's `localhost:3000` then forwards to port 3000 on the dev machine, over USB or wireless debugging. Same URL works on emulator and physical device, so there is no environment switching. (`10.0.2.2` also reaches the host from an emulator, but `adb reverse` is preferred precisely because it is uniform.)
+
+**The forward is lost whenever the phone reconnects** — re-run it after replugging or restarting adb. The debug list's server line (tap to recheck) says which half is missing: *connection refused* means no `adb reverse`; *connection closed without a reply* means the forward is set but the server is not running.
+
+### Server
+
+```
+cd server
+npm install
+npm run dev         # node --watch; restarts on save
+npm run reverse     # adb reverse tcp:3000 tcp:3000
+npm test
+npm run typecheck
+```
+
+- **No build step.** Node 22.18+ runs `.ts` files itself by stripping types; `tsc` only type-checks. So `erasableSyntaxOnly` is on — no enums, namespaces or parameter properties — and relative imports carry the `.ts` extension.
+- Listens on **127.0.0.1** unless `HOST` is set; `PORT` defaults to 3000. `adb reverse` connects from the dev machine, so nothing on the LAN needs to reach it.
+- **`/health` names the service** (`{"service":"breadcrumb","status":"ok"}`) and the app checks the name, so another dev server holding port 3000 is not mistaken for this one. `ServerClientTest` holds the app's side of that contract; change both together.
 
 ### Editors
 
@@ -300,8 +317,15 @@ Do not start the next step until the current one is ticked. Do not batch several
 
 ### Phase 3 — Backend + ingest
 
-- [ ] **3.1** Express skeleton + `/health`; `adb reverse` wired; app pings on launch
+- [x] **3.1** Express skeleton + `/health`; `adb reverse` wired; app pings on launch
+      · *test:* `npm test` in `server/` — `/health` shape, JSON 404, no `x-powered-by`
+      · *test:* `./gradlew testDebugUnitTest` — `ServerClientTest`: reachable, another server on
+        the port, Breadcrumb failing, refused, accepted-then-closed, timeout
       · *test:* app reports server reachable
+      · verified on device: the status line under the title read reachable, and tapping it walked
+        all four states — reachable; no `adb reverse` → "connection refused -- run adb reverse";
+        forward set but server stopped → "connection closed without a reply -- is the server
+        running?"; server restarted → reachable
 - [ ] **3.2** MongoDB Atlas connection + memory collection
       · *test:* server writes and reads back a doc
 - [ ] **3.3** Gemini Flash structured extraction for text memories (one call, per rule #3)
