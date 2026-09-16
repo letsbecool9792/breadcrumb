@@ -7,14 +7,15 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "dev": "node --watch src/index.ts",
-    "start": "node src/index.ts",
+    "dev": "node --env-file-if-exists=.env --watch src/index.ts",
+    "start": "node --env-file-if-exists=.env src/index.ts",
     "reverse": "adb reverse tcp:3000 tcp:3000",
-    "test": "node --test \"src/**/*.test.ts\"",
+    "test": "node --env-file-if-exists=.env --test \"src/**/*.test.ts\"",
     "typecheck": "tsc"
   },
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "mongodb": "^7.6.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
