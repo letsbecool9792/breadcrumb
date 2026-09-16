@@ -162,6 +162,10 @@ npm run typecheck
 - **`node --test` runs each test file in its own process, in parallel.** Two suites sharing one database wipe each other's documents mid-test, and the failures look like impossible counts. Give every test file its own database: `<MONGODB_DB>_test_<suite>`.
 - **A memory is stored even when the model call fails**, with the reason in `enrichmentError`. The phone has already said "Saved" (rule 2), so a document that is merely unenriched can be fixed later, while a missing one is a memory that quietly never synced. Anything re-enriching later looks for that field.
 - **The ingest request is parsed field by field and unknown fields are dropped**, so `localUri` cannot reach the cloud whatever the client sends (rule 1). A test is named for it.
+- **`gemini-embedding-001` only returns unit-length vectors at its full 3072 dims.** At 768 they must be L2-normalised before storage, or cosine similarity measures length as much as meaning. Anything that produces an embedding — ingest, and query embedding at 4.1 — normalises.
+- **Documents and search phrases are embedded under different task types** (`RETRIEVAL_DOCUMENT`, `RETRIEVAL_QUERY`). Using one for both quietly costs retrieval quality.
+- **A vector index's filter fields must be declared up front.** `memories_vector` declares `type`, `hasLink`, `capturedAt` and `sourceAppLabel` for 4.3; adding another later means rebuilding the index. M0 allows three search indexes, and the text index at 4.4 is the second.
+- **Live model tests skip themselves when Gemini is overloaded** (503/429 after retries). A third party's capacity is not something to fail a build over — but a skip is not a pass, so read the run's skip lines.
 
 ### Editors
 
@@ -349,8 +353,17 @@ Do not start the next step until the current one is ticked. Do not batch several
       · **open:** the Gemini free tier may use what is sent to improve Google's products, and
         what is sent is the text of everything saved. Enabling billing on the key's project
         moves it to the paid tier, where it is not. Undecided.
-- [ ] **3.4** Embeddings + Atlas vector index at 768 dims
-      · *test:* two related texts score closer than two unrelated ones
+- [x] **3.4** Embeddings + Atlas vector index at 768 dims
+      · *test:* `npm test` in `server/` — against the live model: 768 unit-length dims, a query
+        phrase landing nearer the memory it describes, and **two related texts scoring closer
+        than two unrelated ones** (by >0.1); plus what gets embedded, and the index definition
+      · verified: `vector index "memories_vector" exists` at startup, and a posted link came
+        back `enriched: True, embedded: True` with its vector in Atlas
+      · **ingest takes ~13s per memory** (Flash, then the embedding). Invisible behind the
+        queue at 3.5, but 5.1 imports hundreds of items — batch or parallelise there, and
+        consider `thinkingBudget: 0` for the extraction call
+      · **open:** `gemini-embedding-2` is now stable and multimodal, which is what Post-V1
+        wanted for screenshots with little text. Staying on `gemini-embedding-001` for V1.
 - [ ] **3.5** WorkManager upload queue with retry
       · *test:* save in airplane mode → reconnect → syncs without duplicating
 - [ ] **3.6** Image ingest — upload for processing, discard server-side after
