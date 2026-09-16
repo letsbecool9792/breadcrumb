@@ -155,6 +155,10 @@ npm run typecheck
 - **No build step.** Node 22.18+ runs `.ts` files itself by stripping types; `tsc` only type-checks. So `erasableSyntaxOnly` is on — no enums, namespaces or parameter properties — and relative imports carry the `.ts` extension.
 - Listens on **127.0.0.1** unless `HOST` is set; `PORT` defaults to 3000. `adb reverse` connects from the dev machine, so nothing on the LAN needs to reach it.
 - **`/health` names the service** (`{"service":"breadcrumb","status":"ok"}`) and the app checks the name, so another dev server holding port 3000 is not mistaken for this one. `ServerClientTest` holds the app's side of that contract; change both together.
+- **Secrets live in `server/.env`**, copied from `.env.example` and loaded by Node's own `--env-file-if-exists` — no dotenv. Every `=` line needs its `KEY=` prefix; a bare connection string pasted in makes Node read everything up to the first `=` as the variable name, and the value simply goes missing.
+- **The Atlas user is `readWriteAnyDatabase`, not `atlasAdmin`.** Enough to read, write and create indexes, and deliberately not enough to drop a database — so tests drop their own *collection* instead. If 3.4's search-index creation is refused for the same reason, create that index in the Atlas UI rather than widening the role for good.
+- **Server tests run against the real cluster** in `<MONGODB_DB>_test`, and skip themselves when `MONGODB_URI` is unset. **Close the Mongo client in a `finally`** in any hook: a teardown that throws with the client still open hangs the whole run instead of reporting the failure that caused it.
+- A free M0 cluster **pauses itself after 60 days idle** and has to be resumed from the Atlas UI.
 
 ### Editors
 
@@ -326,8 +330,11 @@ Do not start the next step until the current one is ticked. Do not batch several
         all four states — reachable; no `adb reverse` → "connection refused -- run adb reverse";
         forward set but server stopped → "connection closed without a reply -- is the server
         running?"; server restarted → reachable
-- [ ] **3.2** MongoDB Atlas connection + memory collection
-      · *test:* server writes and reads back a doc
+- [x] **3.2** MongoDB Atlas connection + memory collection
+      · *test:* `npm test` in `server/` — writes a memory and reads it back whole, a re-send
+        replaces rather than duplicates, an unknown id is null, newest first
+      · verified against the real M0 cluster; the suite skips itself when `MONGODB_URI` is unset
+      · `/health` deliberately still touches no database — it is a liveness check
 - [ ] **3.3** Gemini Flash structured extraction for text memories (one call, per rule #3)
       · *test:* POST a link → structured JSON stored
 - [ ] **3.4** Embeddings + Atlas vector index at 768 dims
