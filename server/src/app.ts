@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { Db } from "mongodb";
 import { db } from "./db.ts";
+import type { Embedder } from "./embeddings.ts";
 import type { Extractor } from "./gemini.ts";
 import { ingest, parseMemory } from "./ingest.ts";
 
@@ -9,6 +10,8 @@ export interface AppOptions {
   log?: boolean;
   /** The Gemini pass. Injected so tests can run the endpoint without a model. */
   extract: Extractor;
+  /** Turns a memory into a vector. Injected for the same reason. */
+  embed: Embedder;
   /** Defaults to the process-wide connection; tests pass their own database. */
   database?: Db;
 }
@@ -17,7 +20,7 @@ export interface AppOptions {
  * The HTTP surface, built without listening so tests can serve it on any
  * port. Stays thin: health, ingest, and search at 4.1.
  */
-export function createApp({ log = true, extract, database }: AppOptions) {
+export function createApp({ log = true, extract, embed, database }: AppOptions) {
   const app = express();
   app.disable("x-powered-by");
 
@@ -40,7 +43,7 @@ export function createApp({ log = true, extract, database }: AppOptions) {
       return;
     }
 
-    const result = await ingest(database ?? db(), extract, parsed.memory);
+    const result = await ingest(database ?? db(), extract, embed, parsed.memory);
     res.status(200).json(result);
   });
 

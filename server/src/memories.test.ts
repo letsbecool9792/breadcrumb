@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
 import type { Db } from "mongodb";
 import { closeMongo, connectMongo, databaseName, db } from "./db.ts";
-import { ensureIndexes, getMemory, memories, putMemory, recentMemories } from "./memories.ts";
+import {
+  ensureIndexes,
+  getMemory,
+  memories,
+  putMemory,
+  recentMemories,
+  vectorIndexDefinition,
+} from "./memories.ts";
 
 /**
  * Runs against the real Atlas cluster, because what is worth checking here --
@@ -14,6 +21,24 @@ import { ensureIndexes, getMemory, memories, putMemory, recentMemories } from ".
  * each other's documents -- and drops its collection afterwards. Saved
  * memories are never touched.
  */
+describe("vectorIndexDefinition", () => {
+  test("declares the vector field at the size we store", () => {
+    const field = vectorIndexDefinition(768).fields[0];
+
+    assert.deepEqual(field, { type: "vector", path: "embedding", numDimensions: 768, similarity: "cosine" });
+  });
+
+  test("declares every field 4.3 filters on", () => {
+    // a field not declared here cannot be a pre-filter, and adding one later
+    // means rebuilding the index
+    const filters = vectorIndexDefinition(768)
+      .fields.filter((field) => field.type === "filter")
+      .map((field) => field.path);
+
+    assert.deepEqual(filters, ["type", "hasLink", "capturedAt", "sourceAppLabel"]);
+  });
+});
+
 describe(
   "memories collection",
   { skip: process.env.MONGODB_URI ? false : "MONGODB_URI is not set (copy .env.example to .env)" },

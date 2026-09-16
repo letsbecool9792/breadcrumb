@@ -32,6 +32,13 @@ export interface MemoryDoc {
 
   /** What one Gemini call made of it (step 3.3). Absent until that succeeds. */
   enrichment?: Enrichment;
+
+  /** Unit-length, [EMBEDDING_DIMENSIONS] long (step 3.4). */
+  embedding?: number[];
+  /** Which model and size produced [embedding], so a re-embed can tell what is stale. */
+  embeddedWith?: { model: string; dimensions: number; at: Date };
+  /** Why the last embedding attempt failed, when it did. */
+  embeddingError?: string;
   /**
    * Why the last enrichment failed. The memory is stored either way, so this
    * marks the ones worth another pass.
@@ -72,6 +79,57 @@ export async function putMemory(database: Db, memory: Omit<MemoryDoc, "syncedAt"
     { ...memory, syncedAt: new Date() },
     { upsert: true },
   );
+}
+
+export const VECTOR_INDEX = "memories_vector";
+
+/**
+ * The Atlas Vector Search index. Declared filter fields are the ones 4.3
+ * filters on before searching; a field not declared here cannot be used as a
+ * pre-filter, and adding one later means rebuilding the index.
+ *
+ * M0 allows three search indexes in total, so this plus the text index at 4.4
+ * still leaves one spare.
+ */
+export function vectorIndexDefinition(dimensions: number) {
+  return {
+    fields: [
+      { type: "vector", path: "embedding", numDimensions: dimensions, similarity: "cosine" },
+      { type: "filter", path: "type" },
+      { type: "filter", path: "hasLink" },
+      { type: "filter", path: "capturedAt" },
+      { type: "filter", path: "sourceAppLabel" },
+    ],
+  };
+}
+
+export type VectorIndexState = "created" | "exists" | "refused";
+
+/**
+ * Creates the vector index if the cluster does not have it.
+ *
+ * Returns "refused" rather than throwing when the database user may not manage
+ * search indexes: readWriteAnyDatabase is enough for everything else this
+ * server does, and widening it permanently for one index would be the wrong
+ * trade -- create it in the Atlas UI from [vectorIndexDefinition] instead.
+ */
+export async function ensureVectorIndex(database: Db, dimensions: number): Promise<VectorIndexState> {
+  const collection = memories(database);
+  try {
+    const existing = await collection.listSearchIndexes().toArray();
+    if (existing.some((index) => index.name === VECTOR_INDEX)) return "exists";
+
+    await collection.createSearchIndex({
+      name: VECTOR_INDEX,
+      type: "vectorSearch",
+      definition: vectorIndexDefinition(dimensions),
+    });
+    return "created";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/not allowed|unauthorized|requires authentication|Atlas Search/i.test(message)) return "refused";
+    throw error;
+  }
 }
 
 export async function getMemory(database: Db, id: string): Promise<MemoryDoc | null> {

@@ -6,6 +6,7 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import type { Db } from "mongodb";
 import { createApp } from "./app.ts";
 import { closeMongo, connectMongo, databaseName, db } from "./db.ts";
+import type { Embedder } from "./embeddings.ts";
 import type { Extraction, Extractor } from "./gemini.ts";
 import { parseMemory } from "./ingest.ts";
 import { ensureIndexes, getMemory, memories } from "./memories.ts";
@@ -81,11 +82,19 @@ describe(
     let base: string;
     let extraction: Extraction | Error;
     let asked: number;
+    let embedding: number[] | Error;
+    let embedded: string[];
 
     const extract: Extractor = async () => {
       asked += 1;
       if (extraction instanceof Error) throw extraction;
       return extraction;
+    };
+
+    const embed: Embedder = async (text) => {
+      embedded.push(text);
+      if (embedding instanceof Error) throw embedding;
+      return embedding;
     };
 
     const post = (body: unknown) =>
@@ -101,7 +110,7 @@ describe(
       // means each suite's cleanup wipes the other's documents mid-test
       database = db(`${databaseName()}_test_ingest`);
       await ensureIndexes(database);
-      server = createApp({ log: false, extract, database }).listen(0, "127.0.0.1");
+      server = createApp({ log: false, extract, embed, database }).listen(0, "127.0.0.1");
       await once(server, "listening");
       base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     });
@@ -121,6 +130,8 @@ describe(
     beforeEach(async () => {
       await memories(database).deleteMany({});
       asked = 0;
+      embedded = [];
+      embedding = [0.6, 0.8];
       extraction = {
         summary: "Qualcomm software engineering internship, applications close April 30",
         kind: "job posting",
@@ -133,9 +144,11 @@ describe(
       const response = await post(sent);
 
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), { id: sent.id, enriched: true });
+      assert.deepEqual(await response.json(), { id: sent.id, enriched: true, embedded: true });
 
       const stored = await getMemory(database, sent.id);
+      assert.deepEqual(stored?.embedding, [0.6, 0.8]);
+      assert.equal(stored?.embeddedWith?.dimensions, 768);
       assert.equal(stored?.title, sent.title);
       assert.equal(stored?.sourceAppLabel, "Chrome");
       assert.equal(stored?.enrichment?.kind, "job posting");
@@ -160,17 +173,48 @@ describe(
       assert.equal(asked, 2);
     });
 
+    test("what gets embedded is the summary first, then the memory's own text", async () => {
+      await post(sent);
+
+      assert.equal(embedded.length, 1);
+      assert.ok(embedded[0]?.startsWith("Qualcomm software engineering internship"));
+      assert.ok(embedded[0]?.includes(sent.rawText), "the memory's own text belongs in the vector too");
+    });
+
     test("a memory is stored even when the model fails, and says why", async () => {
       extraction = new Error("503 model overloaded");
 
       const response = await post(sent);
 
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), { id: sent.id, enriched: false, reason: "503 model overloaded" });
+      assert.deepEqual(await response.json(), {
+        id: sent.id,
+        enriched: false,
+        embedded: true,
+        reason: "503 model overloaded",
+      });
       const stored = await getMemory(database, sent.id);
       assert.equal(stored?.rawText, sent.rawText, "the memory itself must survive a failed model call");
       assert.equal(stored?.enrichmentError, "503 model overloaded");
       assert.equal(stored?.enrichment, undefined);
+      assert.ok(stored?.embedding, "an unenriched memory is still worth embedding");
+    });
+
+    test("a memory is stored even when embedding fails, and says why", async () => {
+      embedding = new Error("429 rate limited");
+
+      const response = await post(sent);
+
+      assert.deepEqual(await response.json(), {
+        id: sent.id,
+        enriched: true,
+        embedded: false,
+        reason: "429 rate limited",
+      });
+      const stored = await getMemory(database, sent.id);
+      assert.equal(stored?.embeddingError, "429 rate limited");
+      assert.equal(stored?.embedding, undefined);
+      assert.ok(stored?.enrichment, "a failed embedding must not cost us the enrichment");
     });
 
     test("an image with no text yet is stored without asking the model", async () => {
@@ -187,9 +231,11 @@ describe(
       assert.deepEqual(await response.json(), {
         id: "image-without-text",
         enriched: false,
+        embedded: false,
         reason: "nothing to read yet",
       });
       assert.equal(asked, 0, "nothing to read means nothing to ask about");
+      assert.equal(embedded.length, 0, "and nothing to embed");
       assert.ok(await getMemory(database, "image-without-text"));
     });
 

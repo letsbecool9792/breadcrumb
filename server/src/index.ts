@@ -1,7 +1,8 @@
 import { createApp } from "./app.ts";
 import { connectMongo, databaseName, db, describeMongoError } from "./db.ts";
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, geminiEmbedder } from "./embeddings.ts";
 import { geminiExtractor, INGEST_MODEL } from "./gemini.ts";
-import { ensureIndexes } from "./memories.ts";
+import { ensureIndexes, ensureVectorIndex, VECTOR_INDEX, vectorIndexDefinition } from "./memories.ts";
 
 const geminiKey = process.env.GEMINI_API_KEY;
 if (!geminiKey) {
@@ -22,14 +23,29 @@ try {
   await connectMongo();
   await ensureIndexes(db());
   console.log(`mongodb connected, database "${databaseName()}"`);
+
+  const index = await ensureVectorIndex(db(), EMBEDDING_DIMENSIONS);
+  if (index === "refused") {
+    console.warn(
+      `cannot create the "${VECTOR_INDEX}" search index with this database user.\n` +
+        "Create it in Atlas (cluster -> Atlas Search -> Create Search Index -> JSON editor,\n" +
+        `on ${databaseName()}.memories, named ${VECTOR_INDEX}) with:\n` +
+        JSON.stringify(vectorIndexDefinition(EMBEDDING_DIMENSIONS), null, 2),
+    );
+  } else {
+    console.log(`vector index "${VECTOR_INDEX}" ${index}`);
+  }
 } catch (error) {
   console.error(`could not reach MongoDB: ${describeMongoError(error)}`);
   process.exit(1);
 }
 
-console.log(`gemini ingest model: ${INGEST_MODEL}`);
+console.log(`gemini models: ${INGEST_MODEL} for ingest, ${EMBEDDING_MODEL} at ${EMBEDDING_DIMENSIONS} dims`);
 
-createApp({ extract: geminiExtractor(geminiKey) }).listen(port, host, (error) => {
+createApp({
+  extract: geminiExtractor(geminiKey),
+  embed: geminiEmbedder(geminiKey),
+}).listen(port, host, (error) => {
   if (error) {
     console.error(
       (error as NodeJS.ErrnoException).code === "EADDRINUSE"

@@ -86,22 +86,25 @@ export function geminiExtractor(apiKey: string): Extractor {
 }
 
 /** Busy or rate-limited, rather than wrong: worth asking again shortly. */
-const TRANSIENT = /\b(429|500|503|UNAVAILABLE|RESOURCE_EXHAUSTED)\b|overloaded|high demand/i;
+export const TRANSIENT = /\b(429|500|503|UNAVAILABLE|RESOURCE_EXHAUSTED)\b|overloaded|high demand/i;
+
+export function isTransient(error: unknown): boolean {
+  return TRANSIENT.test(error instanceof Error ? error.message : String(error));
+}
 
 /**
  * A blip should not leave a memory unenriched. Two more tries, seconds apart --
  * the phone is not waiting on this (rule 2), but the request is.
  */
-async function retryTransient<T>(call: () => Promise<T>, delaysMs = [1_000, 3_000]): Promise<T> {
+export async function retryTransient<T>(call: () => Promise<T>, delaysMs = [1_000, 3_000]): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= delaysMs.length; attempt += 1) {
     try {
       return await call();
     } catch (error) {
       lastError = error;
-      const message = error instanceof Error ? error.message : String(error);
       const delay = delaysMs[attempt];
-      if (delay === undefined || !TRANSIENT.test(message)) break;
+      if (delay === undefined || !isTransient(error)) break;
       await new Promise((resume) => setTimeout(resume, delay));
     }
   }

@@ -1,4 +1,5 @@
 import type { Db } from "mongodb";
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, type Embedder, embeddingText } from "./embeddings.ts";
 import type { Extractor } from "./gemini.ts";
 import { type MemoryDoc, type MemoryType, putMemory } from "./memories.ts";
 
@@ -102,6 +103,7 @@ function asText(value: unknown, field: string, errors: string[]): string | null 
 export interface IngestResult {
   id: string;
   enriched: boolean;
+  embedded: boolean;
   /** Why enrichment did not happen, when it did not. */
   reason?: string;
 }
@@ -114,7 +116,12 @@ export interface IngestResult {
  * user it was saved (rule 2), and an unenriched document can be enriched
  * later, while a missing one is a memory that quietly did not sync.
  */
-export async function ingest(database: Db, extract: Extractor, incoming: IncomingMemory): Promise<IngestResult> {
+export async function ingest(
+  database: Db,
+  extract: Extractor,
+  embed: Embedder,
+  incoming: IncomingMemory,
+): Promise<IngestResult> {
   const text = [incoming.rawText, incoming.extractedText].filter(Boolean).join("\n").trim();
   const enrichable = text.length > 0 || (incoming.title?.length ?? 0) > 0;
 
@@ -134,9 +141,13 @@ export async function ingest(database: Db, extract: Extractor, incoming: Incomin
 
   if (!enrichable) {
     // An image whose OCR found nothing, say: 3.6 sends the picture itself.
+    // Nothing to embed either -- a vector of nothing would only be noise.
     await putMemory(database, doc);
-    return { id: incoming.id, enriched: false, reason: "nothing to read yet" };
+    return { id: incoming.id, enriched: false, embedded: false, reason: "nothing to read yet" };
   }
+
+  let enriched: Omit<MemoryDoc, "syncedAt"> = doc;
+  let reason: string | undefined;
 
   try {
     const extraction = await extract({
@@ -146,11 +157,33 @@ export async function ingest(database: Db, extract: Extractor, incoming: Incomin
       sourceAppLabel: incoming.sourceAppLabel,
       capturedAt: incoming.capturedAt,
     });
-    await putMemory(database, { ...doc, enrichment: { ...extraction, at: new Date() } });
-    return { id: incoming.id, enriched: true };
+    enriched = { ...doc, enrichment: { ...extraction, at: new Date() } };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    await putMemory(database, { ...doc, enrichmentError: reason });
-    return { id: incoming.id, enriched: false, reason };
+    reason = error instanceof Error ? error.message : String(error);
+    enriched = { ...doc, enrichmentError: reason };
   }
+
+  // Embedded after enrichment, so the summary and entities are part of what is
+  // embedded. An unenriched memory is still worth embedding -- its own text is
+  // what the phone already shows -- so a failure above does not skip this.
+  let stored = enriched;
+  try {
+    stored = {
+      ...enriched,
+      embedding: await embed(embeddingText(enriched), "document"),
+      embeddedWith: { model: EMBEDDING_MODEL, dimensions: EMBEDDING_DIMENSIONS, at: new Date() },
+    };
+  } catch (error) {
+    const embeddingError = error instanceof Error ? error.message : String(error);
+    stored = { ...enriched, embeddingError };
+    reason ??= embeddingError;
+  }
+
+  await putMemory(database, stored);
+  return {
+    id: incoming.id,
+    enriched: !!stored.enrichment,
+    embedded: !!stored.embedding,
+    ...(reason === undefined ? {} : { reason }),
+  };
 }
