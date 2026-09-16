@@ -1,6 +1,13 @@
 import { createApp } from "./app.ts";
 import { connectMongo, databaseName, db, describeMongoError } from "./db.ts";
+import { geminiExtractor, INGEST_MODEL } from "./gemini.ts";
 import { ensureIndexes } from "./memories.ts";
+
+const geminiKey = process.env.GEMINI_API_KEY;
+if (!geminiKey) {
+  console.error("GEMINI_API_KEY is not set -- see server/.env.example");
+  process.exit(1);
+}
 
 // 127.0.0.1, not 0.0.0.0. In development the phone arrives through adb reverse,
 // which connects from this machine, so nothing on the local network needs to
@@ -20,7 +27,9 @@ try {
   process.exit(1);
 }
 
-createApp().listen(port, host, (error) => {
+console.log(`gemini ingest model: ${INGEST_MODEL}`);
+
+createApp({ extract: geminiExtractor(geminiKey) }).listen(port, host, (error) => {
   if (error) {
     console.error(
       (error as NodeJS.ErrnoException).code === "EADDRINUSE"

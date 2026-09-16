@@ -9,8 +9,10 @@ import { ensureIndexes, getMemory, memories, putMemory, recentMemories } from ".
  * that an upsert is idempotent, that dates survive the round trip -- is the
  * database's behaviour, not ours.
  *
- * It writes to "<MONGODB_DB>_test", a database of its own, and drops it
- * afterwards, so saved memories are never touched.
+ * It writes to a database of its own -- `node --test` runs each file in its
+ * own process, in parallel, so two suites sharing one database would delete
+ * each other's documents -- and drops its collection afterwards. Saved
+ * memories are never touched.
  */
 describe(
   "memories collection",
@@ -34,7 +36,7 @@ describe(
 
     before(async () => {
       await connectMongo();
-      database = db(`${databaseName()}_test`);
+      database = db(`${databaseName()}_test_memories`);
       await ensureIndexes(database);
     });
 

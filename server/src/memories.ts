@@ -29,6 +29,22 @@ export interface MemoryDoc {
   updatedAt: Date;
   /** Server clock, set on every write here. */
   syncedAt: Date;
+
+  /** What one Gemini call made of it (step 3.3). Absent until that succeeds. */
+  enrichment?: Enrichment;
+  /**
+   * Why the last enrichment failed. The memory is stored either way, so this
+   * marks the ones worth another pass.
+   */
+  enrichmentError?: string;
+}
+
+export interface Enrichment {
+  summary: string;
+  kind: string;
+  entities: string[];
+  dates: string[];
+  at: Date;
 }
 
 export function memories(database: Db): Collection<MemoryDoc> {
@@ -43,7 +59,13 @@ export async function ensureIndexes(database: Db): Promise<void> {
   await memories(database).createIndex({ capturedAt: -1 }, { name: "capturedAt_desc" });
 }
 
-/** Idempotent on the phone's id: re-sending the same memory replaces it. */
+/**
+ * Idempotent on the phone's id: re-sending the same memory replaces it.
+ *
+ * A replace, so a memory that loses a field on the phone loses it here too --
+ * which also means a re-send with no enrichment drops the enrichment, and the
+ * caller passes it back in.
+ */
 export async function putMemory(database: Db, memory: Omit<MemoryDoc, "syncedAt">): Promise<void> {
   await memories(database).replaceOne(
     { _id: memory._id },
