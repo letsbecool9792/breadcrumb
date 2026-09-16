@@ -159,6 +159,9 @@ npm run typecheck
 - **The Atlas user is `readWriteAnyDatabase`, not `atlasAdmin`.** Enough to read, write and create indexes, and deliberately not enough to drop a database — so tests drop their own *collection* instead. If 3.4's search-index creation is refused for the same reason, create that index in the Atlas UI rather than widening the role for good.
 - **Server tests run against the real cluster** in `<MONGODB_DB>_test`, and skip themselves when `MONGODB_URI` is unset. **Close the Mongo client in a `finally`** in any hook: a teardown that throws with the client still open hangs the whole run instead of reporting the failure that caused it.
 - A free M0 cluster **pauses itself after 60 days idle** and has to be resumed from the Atlas UI.
+- **`node --test` runs each test file in its own process, in parallel.** Two suites sharing one database wipe each other's documents mid-test, and the failures look like impossible counts. Give every test file its own database: `<MONGODB_DB>_test_<suite>`.
+- **A memory is stored even when the model call fails**, with the reason in `enrichmentError`. The phone has already said "Saved" (rule 2), so a document that is merely unenriched can be fixed later, while a missing one is a memory that quietly never synced. Anything re-enriching later looks for that field.
+- **The ingest request is parsed field by field and unknown fields are dropped**, so `localUri` cannot reach the cloud whatever the client sends (rule 1). A test is named for it.
 
 ### Editors
 
@@ -335,8 +338,17 @@ Do not start the next step until the current one is ticked. Do not batch several
         replaces rather than duplicates, an unknown id is null, newest first
       · verified against the real M0 cluster; the suite skips itself when `MONGODB_URI` is unset
       · `/health` deliberately still touches no database — it is a liveness check
-- [ ] **3.3** Gemini Flash structured extraction for text memories (one call, per rule #3)
+- [x] **3.3** Gemini Flash structured extraction for text memories (one call, per rule #3)
+      · *test:* `npm test` in `server/` — the endpoint against the real database with a stubbed
+        model (stored shape, idempotent re-send, `localUri` never stored, a failed call still
+        stores the memory, no text means no call, a bad body is refused), the reply parser, and
+        one live call proving the pinned model, the schema and the SDK agree
       · *test:* POST a link → structured JSON stored
+      · verified by the user against the running server and Atlas
+      · model pinned to `gemini-3.8-flash`; enrichment is summary, kind, entities, dates
+      · **open:** the Gemini free tier may use what is sent to improve Google's products, and
+        what is sent is the text of everything saved. Enabling billing on the key's project
+        moves it to the paid tier, where it is not. Undecided.
 - [ ] **3.4** Embeddings + Atlas vector index at 768 dims
       · *test:* two related texts score closer than two unrelated ones
 - [ ] **3.5** WorkManager upload queue with retry
