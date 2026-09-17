@@ -15,6 +15,7 @@ import com.lbc.breadcrumb.data.BreadcrumbDatabase
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryDao
 import com.lbc.breadcrumb.data.OriginalStore
+import com.lbc.breadcrumb.sync.UploadWorker
 import com.lbc.breadcrumb.ui.capture.CaptureSheet
 import com.lbc.breadcrumb.ui.theme.BreadcrumbTheme
 import kotlinx.coroutines.Job
@@ -109,6 +110,10 @@ abstract class CaptureActivity : ComponentActivity() {
         saved = memories
         pendingWrite = write
         state.value = CaptureUiState.Saved(memories, attempted)
+
+        // Asks only; WorkManager decides when. Undo can still beat it, and the
+        // worker skips rows that are gone by the time it looks.
+        if (memories.isNotEmpty()) UploadWorker.schedule(applicationContext)
     }
 
     protected fun showFailed(@StringRes message: Int) {

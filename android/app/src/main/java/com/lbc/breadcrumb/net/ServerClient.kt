@@ -1,11 +1,14 @@
 package com.lbc.breadcrumb.net
 
+import com.lbc.breadcrumb.data.Memory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.EOFException
 import java.io.IOException
 import java.io.InterruptedIOException
@@ -22,10 +25,34 @@ sealed interface ServerStatus {
     data class Unreachable(val reason: String) : ServerStatus
 }
 
+/** What became of one memory we tried to send. */
+sealed interface UploadResult {
+    /** Stored. [remoteId] is the server's id for it, which is the phone's own. */
+    data class Stored(val remoteId: String, val enriched: Boolean, val embedded: Boolean) : UploadResult
+
+    /** The server refused it. Sending the same bytes again gets the same answer. */
+    data class Rejected(val reason: String) : UploadResult
+
+    /** Offline, timed out, or the server is having a bad time. Worth another go. */
+    data class Unavailable(val reason: String) : UploadResult
+}
+
+/** Implemented by [ServerClient]; an interface so the queue can be tested without a server. */
+interface MemoryUploadApi {
+    /**
+     * Sends several memories in one request, and answers for each by id.
+     *
+     * A batch, because ingest runs a model call per request rather than per
+     * memory, and the free tier counts requests. An id missing from the result
+     * is treated as unsent.
+     */
+    suspend fun upload(memories: List<Memory>): Map<String, UploadResult>
+}
+
 /**
- * The app's only way to the backend. Endpoints arrive one per step: health
- * now, ingest at 3.3, search at 4.1. Hand-written rather than generated -- one
- * server, one client, two or three endpoints.
+ * The app's only way to the backend. Endpoints arrive one per step: health,
+ * ingest, and search at 4.1. Hand-written rather than generated -- one server,
+ * one client, a handful of endpoints.
  */
 class ServerClient(
     private val baseUrl: String,
@@ -36,10 +63,16 @@ class ServerClient(
      * default 10s after launch looks broken.
      */
     healthTimeoutMillis: Long = 5_000,
-) {
+    /** Ingest runs two model calls server-side; measured around 13s per memory. */
+    uploadTimeoutMillis: Long = 90_000,
+) : MemoryUploadApi {
 
     private val healthHttp = http.newBuilder()
         .callTimeout(healthTimeoutMillis, TimeUnit.MILLISECONDS)
+        .build()
+
+    private val uploadHttp = http.newBuilder()
+        .callTimeout(uploadTimeoutMillis, TimeUnit.MILLISECONDS)
         .build()
 
     suspend fun health(): ServerStatus = withContext(Dispatchers.IO) {
@@ -51,6 +84,113 @@ class ServerClient(
         } catch (e: IOException) {
             ServerStatus.Unreachable(describe(e))
         }
+    }
+
+    /**
+     * Sends one memory. Idempotent on the memory's own id, so a retry after a
+     * half-finished upload replaces rather than duplicates.
+     *
+     * Ingest runs two model calls server-side and takes seconds; the timeout
+     * allows for that. Nobody is waiting -- the user saw "Saved" long ago
+     * (architecture rule 2).
+     */
+    override suspend fun upload(memories: List<Memory>): Map<String, UploadResult> = withContext(Dispatchers.IO) {
+        if (memories.isEmpty()) return@withContext emptyMap()
+
+        val payload = json.encodeToString(memories.map(MemoryPayload::of))
+        val request = Request.Builder()
+            .url("$baseUrl/memories")
+            .post(payload.toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+
+        try {
+            uploadHttp.newCall(request).execute().use { response ->
+                val body = response.body.string()
+                // The server answers per memory, and a 503 still carries those
+                // answers: some may be stored, others waiting on a model call
+                // that can be tried later.
+                val results = runCatching { json.decodeFromString<IngestReplies>(body).results }.getOrNull()
+                when {
+                    results != null -> memories.associate { it.id to (results.forId(it.id) ?: notAnswered) }
+                    // 4xx: our fault and unchanged by repetition -- except 408
+                    // and 429, which are the server asking for more time.
+                    response.code in 400..499 && response.code != 408 && response.code != 429 ->
+                        memories.associate {
+                            it.id to UploadResult.Rejected("HTTP ${response.code}: ${body.take(200)}")
+                        }
+                    else -> memories.associate { it.id to UploadResult.Unavailable("HTTP ${response.code}") }
+                }
+            }
+        } catch (e: IOException) {
+            memories.associate { it.id to UploadResult.Unavailable(describe(e)) }
+        }
+    }
+
+    private companion object {
+        val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+    }
+}
+
+/**
+ * The wire shape of a memory. Hand-written to match the server (CLAUDE.md: no
+ * codegen between the two), and deliberately without `localUri` or
+ * `syncState`: the original never leaves the device (rule 1), and the sync
+ * state is the phone's own business.
+ */
+@Serializable
+private data class MemoryPayload(
+    val id: String,
+    val type: String,
+    val hasLink: Boolean,
+    val capturedAt: Long,
+    val updatedAt: Long,
+    val contentCreatedAt: Long? = null,
+    val sourceApp: String? = null,
+    val sourceAppLabel: String? = null,
+    val title: String? = null,
+    val rawText: String? = null,
+    val extractedText: String? = null,
+) {
+    companion object {
+        fun of(memory: Memory) = MemoryPayload(
+            id = memory.id,
+            type = memory.type.name,
+            hasLink = memory.hasLink,
+            capturedAt = memory.capturedAt,
+            updatedAt = memory.updatedAt,
+            contentCreatedAt = memory.contentCreatedAt,
+            sourceApp = memory.sourceApp,
+            sourceAppLabel = memory.sourceAppLabel,
+            title = memory.title,
+            rawText = memory.rawText,
+            extractedText = memory.extractedText,
+        )
+    }
+}
+
+/** No default for [results]: a body without it -- an error page, a refusal -- must not decode into "no answers". */
+@Serializable
+private data class IngestReplies(val results: List<IngestReply>)
+
+@Serializable
+private data class IngestReply(
+    val id: String? = null,
+    val enriched: Boolean = false,
+    val embedded: Boolean = false,
+    /** The memory is stored, but a model call failed in a way that may pass. */
+    val retryable: Boolean = false,
+    val reason: String? = null,
+)
+
+/** A memory the server did not mention is one we cannot call sent. */
+private val notAnswered = UploadResult.Unavailable("the server did not answer for this memory")
+
+private fun List<IngestReply>.forId(id: String): UploadResult? {
+    val reply = firstOrNull { it.id == id } ?: return null
+    return if (reply.retryable) {
+        UploadResult.Unavailable(reply.reason ?: "the server asked us to send it again")
+    } else {
+        UploadResult.Stored(remoteId = reply.id ?: id, enriched = reply.enriched, embedded = reply.embedded)
     }
 }
 

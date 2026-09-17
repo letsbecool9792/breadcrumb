@@ -6,6 +6,7 @@ import com.lbc.breadcrumb.data.OriginalStore
 import com.lbc.breadcrumb.net.ServerClient
 import com.lbc.breadcrumb.ocr.MlKitOcrReader
 import com.lbc.breadcrumb.ocr.OcrQueue
+import com.lbc.breadcrumb.sync.UploadWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +40,7 @@ class BreadcrumbApp : Application() {
                 dao = BreadcrumbDatabase.get(this@BreadcrumbApp).memoryDao(),
                 store = OriginalStore(this@BreadcrumbApp),
                 reader = MlKitOcrReader(),
+                onRead = { UploadWorker.schedule(this@BreadcrumbApp) },
             ).run()
         }
     }

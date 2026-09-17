@@ -46,12 +46,61 @@ interface MemoryDao {
     @Query("SELECT COUNT(*) FROM memories")
     fun observeCount(): Flow<Int>
 
-    /** The upload queue: oldest first, so saves sync in the order they happened. */
+    /** Saved here but not yet on the server: queued, in flight, or refused. */
+    @Query("SELECT COUNT(*) FROM memories WHERE syncState != 'SYNCED'")
+    fun observeUnsyncedCount(): Flow<Int>
+
+    /**
+     * The upload queue: oldest first, so saves sync in the order they happened.
+     *
+     * PENDING only. A transient failure -- offline, server down -- puts a row
+     * back to PENDING, while FAILED means the server refused this memory, and
+     * sending the same bytes again would only be refused again. [retryFailed]
+     * is how those get another chance, once something has changed.
+     */
+    /**
+     * @param ocrDeadline an image saved after this is held back while OCR has
+     *   still to read it: sending it now costs a Gemini pass on a memory whose
+     *   words arrive seconds later, and another when they do. Images older
+     *   than the deadline go regardless, so a read that never finishes cannot
+     *   strand a memory off the server.
+     */
     @Query(
-        "SELECT * FROM memories WHERE syncState IN ('PENDING', 'FAILED') " +
+        "SELECT * FROM memories WHERE syncState = 'PENDING' " +
+            "AND NOT (type = 'IMAGE' AND extractedText IS NULL AND localUri IS NOT NULL " +
+            "AND capturedAt > :ocrDeadline) " +
             "ORDER BY capturedAt ASC LIMIT :limit"
     )
-    suspend fun pendingUploads(limit: Int = 50): List<Memory>
+    suspend fun pendingUploads(ocrDeadline: Long, limit: Int = 50): List<Memory>
+
+    /**
+     * UPLOADING means a request was in flight when the process died -- no
+     * worker is running at the time this is called, since uploads are unique
+     * work. The send was idempotent, so re-sending is safe.
+     */
+    @Query("UPDATE memories SET syncState = 'PENDING' WHERE syncState = 'UPLOADING'")
+    suspend fun resetStaleUploads(): Int
+
+    /** @return 0 when the row changed under us and should be left alone. */
+    @Query("UPDATE memories SET syncState = 'UPLOADING' WHERE id = :id AND syncState = 'PENDING'")
+    suspend fun markUploading(id: String): Int
+
+    /**
+     * Only from UPLOADING: if OCR text arrived mid-upload the row is PENDING
+     * again, and marking it synced would strand the newer text off the server.
+     */
+    @Query(
+        "UPDATE memories SET syncState = 'SYNCED', remoteId = :remoteId " +
+            "WHERE id = :id AND syncState = 'UPLOADING'"
+    )
+    suspend fun markSynced(id: String, remoteId: String): Int
+
+    @Query("UPDATE memories SET syncState = :state WHERE id = :id AND syncState = 'UPLOADING'")
+    suspend fun markUploadEnded(id: String, state: SyncState): Int
+
+    /** Queues every refused memory again -- after a fix, on demand. */
+    @Query("UPDATE memories SET syncState = 'PENDING' WHERE syncState = 'FAILED'")
+    suspend fun retryFailed(): Int
 
     @Query("SELECT * FROM memories WHERE type = :type ORDER BY capturedAt DESC")
     suspend fun getByType(type: MemoryType): List<Memory>
@@ -95,7 +144,11 @@ interface MemoryDao {
      * written in the meantime. It also only fills text that is still unread.
      */
     @Query(
-        "UPDATE memories SET extractedText = :text, updatedAt = :now " +
+        "UPDATE memories SET extractedText = :text, updatedAt = :now, " +
+            // Text the server has not seen: queue the memory again, so what it
+            // holds matches the phone. Reading nothing changes nothing, and
+            // re-sending for that would cost a Gemini pass for no new words.
+            "syncState = CASE WHEN :text != '' THEN 'PENDING' ELSE syncState END " +
             "WHERE id = :id AND extractedText IS NULL"
     )
     suspend fun setExtractedText(id: String, text: String, now: Long)

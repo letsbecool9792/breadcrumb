@@ -106,20 +106,37 @@ class MemoryDaoTest {
     }
 
     @Test
-    fun pendingUploads_returnsOnlyUnsyncedOldestFirst() = runBlocking {
+    fun pendingUploads_returnsOnlyWhatIsWaitingToBeSent() = runBlocking {
         dao.upsertAll(
             listOf(
-                Memory(id = "p", type = MemoryType.TEXT, capturedAt = 2_000, syncState = SyncState.PENDING),
+                Memory(id = "p2", type = MemoryType.TEXT, capturedAt = 2_000, syncState = SyncState.PENDING),
                 Memory(id = "s", type = MemoryType.TEXT, capturedAt = 1_000, syncState = SyncState.SYNCED),
                 Memory(id = "f", type = MemoryType.TEXT, capturedAt = 1_500, syncState = SyncState.FAILED),
                 Memory(id = "u", type = MemoryType.TEXT, capturedAt = 3_000, syncState = SyncState.UPLOADING),
+                Memory(id = "p1", type = MemoryType.TEXT, capturedAt = 500, syncState = SyncState.PENDING),
             )
         )
 
-        val queued = dao.pendingUploads().map { it.id }
+        val queued = dao.pendingUploads(ocrDeadline = 0).map { it.id }
 
-        // FAILED is retried, SYNCED is done, UPLOADING is already in flight
-        assertEquals(listOf("f", "p"), queued)
+        // SYNCED is done, UPLOADING is in flight, and FAILED was refused --
+        // re-sending the same bytes would only be refused again (retryFailed
+        // is how those get another chance)
+        assertEquals(listOf("p1", "p2"), queued)
+    }
+
+    @Test
+    fun readingTextQueuesTheMemoryToSyncAgain() = runBlocking {
+        dao.upsert(Memory(id = "shot", type = MemoryType.IMAGE, syncState = SyncState.SYNCED))
+        dao.upsert(Memory(id = "blank", type = MemoryType.IMAGE, syncState = SyncState.SYNCED))
+
+        dao.setExtractedText("shot", "Qualcomm SWE Internship", now = 2_000)
+        dao.setExtractedText("blank", "", now = 2_000)
+
+        // the server has not seen those words yet
+        assertEquals(SyncState.PENDING, dao.getById("shot")!!.syncState)
+        // but reading nothing changes nothing worth a second Gemini pass
+        assertEquals(SyncState.SYNCED, dao.getById("blank")!!.syncState)
     }
 
     @Test

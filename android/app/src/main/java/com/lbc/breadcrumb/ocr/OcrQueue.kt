@@ -26,6 +26,11 @@ class OcrQueue(
     private val reader: OcrReader,
     private val batchSize: Int = 10,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * Called after text is written. Reading an image queues it to sync again,
+     * since the server has not seen those words yet (step 3.5).
+     */
+    private val onRead: () -> Unit = {},
 ) {
 
     /**
@@ -75,6 +80,7 @@ class OcrQueue(
             }
         }
         dao.setExtractedText(memory.id, text, clock())
+        if (text.isNotEmpty()) onRead()
     }
 
     private companion object {

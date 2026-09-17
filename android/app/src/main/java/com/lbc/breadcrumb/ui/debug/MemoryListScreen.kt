@@ -75,6 +75,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun MemoryListScreen(viewModel: MemoryListViewModel = viewModel()) {
     val memories by viewModel.memories.collectAsStateWithLifecycle()
+    val unsynced by viewModel.unsynced.collectAsStateWithLifecycle()
     val searching = FtsQuery.matchExpression(viewModel.query) != null
 
     Scaffold(
@@ -85,10 +86,15 @@ fun MemoryListScreen(viewModel: MemoryListViewModel = viewModel()) {
                         Column {
                             Text("Breadcrumb", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                text = when {
-                                    searching -> "debug · ${memories.size} matching"
-                                    memories.isEmpty() -> "debug · no memories"
-                                    else -> "debug · ${memories.size} memories"
+                                text = buildString {
+                                    append(
+                                        when {
+                                            searching -> "debug · ${memories.size} matching"
+                                            memories.isEmpty() -> "debug · no memories"
+                                            else -> "debug · ${memories.size} memories"
+                                        }
+                                    )
+                                    if (unsynced > 0) append(" · $unsynced unsent")
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -96,6 +102,11 @@ fun MemoryListScreen(viewModel: MemoryListViewModel = viewModel()) {
                         }
                     },
                     actions = {
+                        if (unsynced > 0) {
+                            TextButton(onClick = { viewModel.syncNow() }) {
+                                Text("Sync")
+                            }
+                        }
                         // hidden while searching, where it would read as "clear these results"
                         if (memories.isNotEmpty() && !searching) {
                             TextButton(onClick = { viewModel.clearAll() }) {

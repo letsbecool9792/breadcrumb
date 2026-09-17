@@ -15,6 +15,7 @@ import com.lbc.breadcrumb.data.FtsQuery
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.OriginalStore
 import com.lbc.breadcrumb.net.ServerStatus
+import com.lbc.breadcrumb.sync.UploadWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -66,8 +67,21 @@ class MemoryListViewModel(app: Application) : AndroidViewModel(app) {
     var serverStatus by mutableStateOf<ServerStatus>(ServerStatus.Checking)
         private set
 
+    /** How many saves the server has not seen yet. */
+    val unsynced: StateFlow<Int> = dao.observeUnsyncedCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
     init {
         checkServer()
+        // Catch-up: anything left queued by an earlier run, or by a save made
+        // while offline, goes out as soon as there is a network.
+        UploadWorker.schedule(app)
+    }
+
+    /** Debug-only: queue the refused ones again and ask for a pass now. */
+    fun syncNow() = viewModelScope.launch(Dispatchers.IO) {
+        dao.retryFailed()
+        UploadWorker.schedule(getApplication())
     }
 
     /** On launch, and again on tap -- adb reverse drops whenever the phone reconnects. */
