@@ -44,12 +44,31 @@ The product should feel like a personal search engine, not a digital notebook.
 | Mobile | **Native Android** — Kotlin, Jetpack Compose, MVVM, Room, WorkManager |
 | Backend | Node + Express + TypeScript |
 | Database | MongoDB Atlas (M0 free tier) + Atlas Vector Search |
-| Ingest AI | Gemini Flash (multimodal — text, image, audio in one call) |
+| Ingest AI | **Gemini 3.5 Flash Lite** (multimodal — text, image, audio in one call) |
 | Query AI | Gemini Flash-Lite (query parsing, cheap and fast) |
 | Embeddings | `gemini-embedding-001` |
 | On-device OCR | ML Kit Text Recognition v2 |
 
-Pin explicit Gemini model versions in code. The `gemini-flash-latest` alias exists but must not be used in source — behavior shifts under you.
+Pin explicit Gemini model versions in code. The `gemini-flash-latest` alias exists but must not be used in source — behavior shifts under you. `pinnedModel` refuses one outright.
+
+### The free tier is the design constraint
+
+**No billing.** Decided 2026-09-17, after a day's testing hit the wall. What the free tier allows, per model per day:
+
+| Model | RPM | RPD |
+|---|---|---|
+| Every full Flash (2.5, 3, 3.5, 3.6, 3.7, 3.8) | 5 | **20** |
+| **Gemini 3.5 / 3.1 Flash Lite** | 15 | **500** |
+| Gemini Embedding 1 and 2 | 100 | 1000 |
+| Gemma 4 26B / 31B | 30 | 14,400 |
+
+So ingest runs on **Flash Lite**, and everything is built to spend requests, not memories:
+
+- **Batch.** One call reads ten memories; embeddings take an array too. 500 seed items is ~50 requests.
+- **Never pay twice.** Fingerprints of what the model read mean a retry or a re-send costs nothing.
+- **Ask only when there is something new to read.** An image waits for OCR; a memory with no text is stored without a model call at all.
+
+Gemma's 14,400/day is the escape hatch if 500 ever binds, though it likely has no structured output. Check current limits at `aistudio.google.com/rate-limit` with "All models" on.
 
 ### Rejected: React Native
 
@@ -165,6 +184,8 @@ npm run typecheck
 - **`gemini-embedding-001` only returns unit-length vectors at its full 3072 dims.** At 768 they must be L2-normalised before storage, or cosine similarity measures length as much as meaning. Anything that produces an embedding — ingest, and query embedding at 4.1 — normalises.
 - **Documents and search phrases are embedded under different task types** (`RETRIEVAL_DOCUMENT`, `RETRIEVAL_QUERY`). Using one for both quietly costs retrieval quality.
 - **A vector index's filter fields must be declared up front.** `memories_vector` declares `type`, `hasLink`, `capturedAt` and `sourceAppLabel` for 4.3; adding another later means rebuilding the index. M0 allows three search indexes, and the text index at 4.4 is the second.
+- **`FAILED` means the server refused a memory**, and is not retried automatically: the same bytes would be refused again. Transient failures go back to `PENDING` instead, and the debug Sync button queues refused ones again.
+- **A model call that may succeed later must answer 503, never 200.** A 200 marks the memory synced on the phone, and nothing re-enriches it afterwards — the phone re-sending it *is* the re-enrichment path.
 - **Live model tests skip themselves when Gemini is overloaded** (503/429 after retries). A third party's capacity is not something to fail a build over — but a skip is not a pass, so read the run's skip lines.
 
 ### Editors
@@ -364,8 +385,17 @@ Do not start the next step until the current one is ticked. Do not batch several
         consider `thinkingBudget: 0` for the extraction call
       · **open:** `gemini-embedding-2` is now stable and multimodal, which is what Post-V1
         wanted for screenshots with little text. Staying on `gemini-embedding-001` for V1.
-- [ ] **3.5** WorkManager upload queue with retry
+- [x] **3.5** WorkManager upload queue with retry
+      · *test:* `npm test` in `server/` — batching (one model call per batch), reuse of unchanged
+        text, a skipped item, 503 on a rate limit, per-item validation errors
+      · *test:* `./gradlew testDebugUnitTest` — `ServerClientTest`: the payload carries no
+        `localUri`, per-memory answers, refusal vs unavailable, an unmentioned memory
+      · *test:* on-device `MemoryUploaderTest` — oldest first, one request per batch, nothing
+        sent twice, offline stays queued, refusals stop, stale UPLOADING re-queued, an image
+        waiting on OCR held back, text read mid-upload keeping it queued
       · *test:* save in airplane mode → reconnect → syncs without duplicating
+      · verified on device with the server running: the queue drained on launch, a save in
+        airplane mode stayed unsent, and reconnecting drained it with nothing duplicated
 - [ ] **3.6** Image ingest — upload for processing, discard server-side after
       · *test:* share a screenshot → entities returned, original still only on device
 
