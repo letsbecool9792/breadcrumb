@@ -32,11 +32,19 @@ export interface MemoryDoc {
 
   /** What one Gemini call made of it (step 3.3). Absent until that succeeds. */
   enrichment?: Enrichment;
+  /**
+   * Fingerprint of the text [enrichment] was made from. A re-send whose text
+   * has not changed reuses it rather than spending another model call -- which
+   * is what keeps retries free on a rate-limited free tier.
+   */
+  enrichedFrom?: string;
 
   /** Unit-length, [EMBEDDING_DIMENSIONS] long (step 3.4). */
   embedding?: number[];
   /** Which model and size produced [embedding], so a re-embed can tell what is stale. */
   embeddedWith?: { model: string; dimensions: number; at: Date };
+  /** Fingerprint of the text [embedding] was made from, as with [enrichedFrom]. */
+  embeddedFrom?: string;
   /** Why the last embedding attempt failed, when it did. */
   embeddingError?: string;
   /**
@@ -130,6 +138,17 @@ export async function ensureVectorIndex(database: Db, dimensions: number): Promi
     if (/not allowed|unauthorized|requires authentication|Atlas Search/i.test(message)) return "refused";
     throw error;
   }
+}
+
+/** The same, for a batch: one round trip rather than one per memory. */
+export async function putMemories(database: Db, docs: Omit<MemoryDoc, "syncedAt">[]): Promise<void> {
+  if (docs.length === 0) return;
+  const syncedAt = new Date();
+  await memories(database).bulkWrite(
+    docs.map((doc) => ({
+      replaceOne: { filter: { _id: doc._id }, replacement: { ...doc, syncedAt }, upsert: true },
+    })),
+  );
 }
 
 export async function getMemory(database: Db, id: string): Promise<MemoryDoc | null> {

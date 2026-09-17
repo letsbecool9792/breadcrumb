@@ -84,17 +84,20 @@ describe(
     let asked: number;
     let embedding: number[] | Error;
     let embedded: string[];
+    let embeddedCalls: number;
 
-    const extract: Extractor = async () => {
+    /** Counts calls, not items: the point of batching is fewer calls. */
+    const extract: Extractor = async (inputs) => {
       asked += 1;
       if (extraction instanceof Error) throw extraction;
-      return extraction;
+      return new Map(inputs.map((input) => [input.index, extraction as Extraction]));
     };
 
-    const embed: Embedder = async (text) => {
-      embedded.push(text);
+    const embed: Embedder = async (texts) => {
+      embedded.push(...texts);
+      embeddedCalls += 1;
       if (embedding instanceof Error) throw embedding;
-      return embedding;
+      return texts.map(() => embedding as number[]);
     };
 
     const post = (body: unknown) =>
@@ -131,6 +134,7 @@ describe(
       await memories(database).deleteMany({});
       asked = 0;
       embedded = [];
+      embeddedCalls = 0;
       embedding = [0.6, 0.8];
       extraction = {
         summary: "Qualcomm software engineering internship, applications close April 30",
@@ -181,21 +185,75 @@ describe(
       assert.ok(embedded[0]?.includes(sent.rawText), "the memory's own text belongs in the vector too");
     });
 
-    test("a memory is stored even when the model fails, and says why", async () => {
-      extraction = new Error("503 model overloaded");
+    test("a rate-limited memory is stored, and the phone is told to send it again", async () => {
+      // the free tier's daily cap, mid-save
+      extraction = new Error('{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}');
 
       const response = await post(sent);
 
-      assert.equal(response.status, 200);
+      // 503, not 200: a success would mark it synced on the phone and leave it
+      // unenriched for good, since nothing else ever enriches it
+      assert.equal(response.status, 503);
+      const body = (await response.json()) as { retryable: boolean; enriched: boolean };
+      assert.equal(body.retryable, true);
+      assert.equal(body.enriched, false);
+      assert.ok(await getMemory(database, sent.id), "the memory itself is still stored");
+    });
+
+    test("re-sending unchanged text costs no model calls", async () => {
+      await post(sent);
+      assert.equal(asked, 1);
+      assert.equal(embedded.length, 1);
+
+      await post(sent);
+
+      // what the model read has not changed, so neither would its answer
+      assert.equal(asked, 1, "Gemini should not be asked twice about the same words");
+      assert.equal(embedded.length, 1, "nor should the same text be embedded twice");
+      const stored = await getMemory(database, sent.id);
+      assert.equal(stored?.enrichment?.kind, "job posting");
+      assert.deepEqual(stored?.embedding, [0.6, 0.8]);
+    });
+
+    test("a memory enriched before fingerprints existed is not paid for twice", async () => {
+      await post(sent);
+      // as documents looked before this step
+      await memories(database).updateOne(
+        { _id: sent.id },
+        { $unset: { enrichedFrom: "", embeddedFrom: "" } },
+      );
+
+      await post(sent);
+
+      assert.equal(asked, 1, "the stored enrichment should be recognised as current");
+      assert.equal(embedded.length, 1);
+    });
+
+    test("text added after the first send is enriched and embedded again", async () => {
+      await post(sent);
+
+      // OCR finished on the phone and the memory came back with more to read
+      await post({ ...sent, extractedText: "Qualcomm | Software Engineering Intern | Bengaluru" });
+
+      assert.equal(asked, 2);
+      assert.equal(embedded.length, 2);
+    });
+
+    test("a memory is stored even when the model fails for good, and says why", async () => {
+      extraction = new Error("400 invalid argument");
+
+      const response = await post(sent);
+
+      assert.equal(response.status, 200, "a permanent failure is not worth retrying");
       assert.deepEqual(await response.json(), {
         id: sent.id,
         enriched: false,
         embedded: true,
-        reason: "503 model overloaded",
+        reason: "400 invalid argument",
       });
       const stored = await getMemory(database, sent.id);
       assert.equal(stored?.rawText, sent.rawText, "the memory itself must survive a failed model call");
-      assert.equal(stored?.enrichmentError, "503 model overloaded");
+      assert.equal(stored?.enrichmentError, "400 invalid argument");
       assert.equal(stored?.enrichment, undefined);
       assert.ok(stored?.embedding, "an unenriched memory is still worth embedding");
     });
@@ -205,11 +263,13 @@ describe(
 
       const response = await post(sent);
 
+      assert.equal(response.status, 503, "rate limits pass; the phone should try again");
       assert.deepEqual(await response.json(), {
         id: sent.id,
         enriched: true,
         embedded: false,
         reason: "429 rate limited",
+        retryable: true,
       });
       const stored = await getMemory(database, sent.id);
       assert.equal(stored?.embeddingError, "429 rate limited");
@@ -239,13 +299,87 @@ describe(
       assert.ok(await getMemory(database, "image-without-text"));
     });
 
+    test("a batch of memories costs one model call, not one each", async () => {
+      // the whole point on a free tier, which counts requests rather than items
+      const batch = [0, 1, 2, 3, 4].map((n) => ({ ...sent, id: `batch-${n}`, title: `Item ${n}` }));
+
+      const response = await post(batch);
+
+      assert.equal(response.status, 200);
+      const body = (await response.json()) as { results: { id: string; enriched: boolean }[] };
+      assert.equal(body.results.length, 5);
+      assert.ok(body.results.every((result) => result.enriched));
+      assert.equal(asked, 1, "one Gemini call for the batch");
+      assert.equal(embeddedCalls, 1, "one embedding call for the batch");
+      assert.equal(await memories(database).countDocuments(), 5);
+    });
+
+    test("in a batch, only what is new is sent to the model", async () => {
+      await post([{ ...sent, id: "already" }]);
+      asked = 0;
+      embedded = [];
+
+      await post([{ ...sent, id: "already" }, { ...sent, id: "fresh" }]);
+
+      assert.equal(asked, 1);
+      assert.equal(embedded.length, 1, "only the new memory needed reading");
+      assert.ok(await getMemory(database, "already"));
+      assert.ok(await getMemory(database, "fresh"));
+    });
+
+    test("a memory the model skips is stored, and says so", async () => {
+      extraction = {
+        summary: "answered for one item only",
+        kind: "note",
+        entities: [],
+        dates: [],
+      };
+      // an extractor that answers for the first item and ignores the rest
+      const partial: Extractor = async (inputs) => {
+        asked += 1;
+        const first = inputs[0];
+        return first ? new Map([[first.index, extraction as Extraction]]) : new Map();
+      };
+      const app = createApp({ log: false, extract: partial, embed, database });
+      const server2 = app.listen(0, "127.0.0.1");
+      await once(server2, "listening");
+      const base2 = `http://127.0.0.1:${(server2.address() as AddressInfo).port}`;
+
+      try {
+        const response = await fetch(`${base2}/memories`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify([{ ...sent, id: "answered" }, { ...sent, id: "skipped" }]),
+        });
+        const body = (await response.json()) as { results: { id: string; enriched: boolean; reason?: string }[] };
+
+        assert.deepEqual(body.results.map((result) => result.enriched), [true, false]);
+        assert.match(body.results[1]?.reason ?? "", /returned nothing/);
+        // stored regardless, and still embedded from its own text
+        const stored = await getMemory(database, "skipped");
+        assert.ok(stored?.embedding, "an unenriched memory is still worth embedding");
+      } finally {
+        server2.closeAllConnections();
+        server2.close();
+      }
+    });
+
+    test("too many memories at once is refused", async () => {
+      const response = await post(Array.from({ length: 51 }, (_, n) => ({ ...sent, id: `over-${n}` })));
+
+      assert.equal(response.status, 400);
+      assert.equal(await memories(database).countDocuments(), 0);
+    });
+
     test("an invalid body is refused with reasons and stores nothing", async () => {
       const response = await post({ id: "bad", type: "VIDEO" });
 
       assert.equal(response.status, 400);
-      const body = (await response.json()) as { error: string; details: string[] };
+      const body = (await response.json()) as { error: string; invalid: { index: number; errors: string[] }[] };
       assert.equal(body.error, "invalid memory");
-      assert.ok(body.details.length > 0);
+      // which item, and what is wrong with it: a batch must say both
+      assert.deepEqual(body.invalid.map((item) => item.index), [0]);
+      assert.ok((body.invalid[0]?.errors.length ?? 0) > 0);
       assert.equal(await memories(database).countDocuments(), 0);
       assert.equal(asked, 0);
     });

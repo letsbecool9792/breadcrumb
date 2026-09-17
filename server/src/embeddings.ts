@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { retryTransient } from "./gemini.ts";
+import { pinnedModel, retryTransient } from "./gemini.ts";
 import type { MemoryDoc } from "./memories.ts";
 
 /**
@@ -8,7 +8,9 @@ import type { MemoryDoc } from "./memories.ts";
  * than only as its text -- a real gain for images with little text, and a
  * deliberate change to make, not a drive-by one (see Post-V1).
  */
-export const EMBEDDING_MODEL = "gemini-embedding-001";
+export const DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001";
+
+export const EMBEDDING_MODEL = pinnedModel(process.env.GEMINI_EMBEDDING_MODEL, DEFAULT_EMBEDDING_MODEL);
 
 /**
  * 768, per architecture rule 8: MTEB 67.99 against 68.17 at 1536 and 3072,
@@ -30,29 +32,41 @@ const MAX_CHARS = 6_000;
  */
 export type EmbeddingPurpose = "document" | "query";
 
-export type Embedder = (text: string, purpose: EmbeddingPurpose) => Promise<number[]>;
+/**
+ * Embeds several texts in one call, in the order given. Batched for the same
+ * reason as extraction: a free tier counts requests, not items.
+ */
+export type Embedder = (texts: string[], purpose: EmbeddingPurpose) => Promise<number[][]>;
 
 export function geminiEmbedder(apiKey: string): Embedder {
   const ai = new GoogleGenAI({ apiKey });
 
-  return async (text, purpose) =>
-    retryTransient(async () => {
+  return async (texts, purpose) => {
+    if (texts.length === 0) return [];
+    return retryTransient(async () => {
       const response = await ai.models.embedContent({
         model: EMBEDDING_MODEL,
-        contents: text.slice(0, MAX_CHARS),
+        contents: texts.map((text) => text.slice(0, MAX_CHARS)),
         config: {
           outputDimensionality: EMBEDDING_DIMENSIONS,
           taskType: purpose === "query" ? "RETRIEVAL_QUERY" : "RETRIEVAL_DOCUMENT",
         },
       });
 
-      const values = response.embeddings?.[0]?.values;
-      if (!values?.length) throw new Error("Gemini returned no embedding");
-      if (values.length !== EMBEDDING_DIMENSIONS) {
-        throw new Error(`expected ${EMBEDDING_DIMENSIONS} dimensions, got ${values.length}`);
+      const embeddings = response.embeddings ?? [];
+      if (embeddings.length !== texts.length) {
+        throw new Error(`asked for ${texts.length} embeddings, got ${embeddings.length}`);
       }
-      return normalize(values);
+      return embeddings.map((embedding) => {
+        const values = embedding.values;
+        if (!values?.length) throw new Error("Gemini returned an empty embedding");
+        if (values.length !== EMBEDDING_DIMENSIONS) {
+          throw new Error(`expected ${EMBEDDING_DIMENSIONS} dimensions, got ${values.length}`);
+        }
+        return normalize(values);
+      });
     });
+  };
 }
 
 /**

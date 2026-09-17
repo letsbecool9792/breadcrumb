@@ -85,7 +85,10 @@ describe(
   `${EMBEDDING_MODEL} live`,
   { skip: process.env.GEMINI_API_KEY ? false : "GEMINI_API_KEY is not set (see .env.example)" },
   () => {
-    const embed = geminiEmbedder(process.env.GEMINI_API_KEY as string);
+    const embedder = geminiEmbedder(process.env.GEMINI_API_KEY as string);
+    /** These tests read one vector at a time; the batch shape is exercised below. */
+    const embed = async (text: string, purpose: "document" | "query") =>
+      (await embedder([text], purpose))[0] as number[];
 
     const internship = "Qualcomm software engineering internship in Bengaluru, applications close April 30";
     const sameThing = "SWE intern role at Qualcomm, apply by the end of April";
@@ -112,11 +115,9 @@ describe(
 
     test("two related texts score closer than two unrelated ones", async (t) =>
       unlessBusy(t, async () => {
-        const [a, b, c] = await Promise.all([
-          embed(internship, "document"),
-          embed(sameThing, "document"),
-          embed(restaurant, "document"),
-        ]);
+        // one request for all three: a free tier counts requests, not texts
+        const [a, b, c] = await embedder([internship, sameThing, restaurant], "document");
+        assert.ok(a && b && c, "a batch must come back in the order it was sent");
 
         const related = cosine(a, b);
         const unrelated = cosine(a, c);
@@ -128,11 +129,9 @@ describe(
     test("a remembered phrase finds the memory it describes", async (t) =>
       unlessBusy(t, async () => {
         // what someone would actually type, against what we store
-        const [query, job, dinner] = await Promise.all([
-          embed("that internship thing I saved", "query"),
-          embed(internship, "document"),
-          embed(restaurant, "document"),
-        ]);
+        const query = await embed("that internship thing I saved", "query");
+        const [job, dinner] = await embedder([internship, restaurant], "document");
+        assert.ok(job && dinner);
 
         assert.ok(
           cosine(query, job) > cosine(query, dinner),

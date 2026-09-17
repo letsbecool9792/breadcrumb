@@ -3,7 +3,10 @@ import type { Db } from "mongodb";
 import { db } from "./db.ts";
 import type { Embedder } from "./embeddings.ts";
 import type { Extractor } from "./gemini.ts";
-import { ingest, parseMemory } from "./ingest.ts";
+import { type IncomingMemory, ingest, parseMemory } from "./ingest.ts";
+
+/** One request's worth of memories. The phone sends ten; this is the ceiling. */
+const MAX_BATCH = 50;
 
 export interface AppOptions {
   /** One line per request. Off in tests, where it only buries the results. */
@@ -36,15 +39,35 @@ export function createApp({ log = true, extract, embed, database }: AppOptions) 
   // A whole memory per request, and the phone's own id as the key, so a retried
   // upload replaces rather than duplicates. Still unauthenticated: the device
   // token is a V1 item of its own, and this only ever listens on localhost.
-  app.post("/memories", express.json({ limit: "1mb" }), async (req, res) => {
-    const parsed = parseMemory(req.body);
-    if (!parsed.ok) {
-      res.status(400).json({ error: "invalid memory", details: parsed.errors });
+  app.post("/memories", express.json({ limit: "4mb" }), async (req, res) => {
+    // An array is the shape the phone sends, since a batch costs one model
+    // call rather than one each. A single memory is accepted too, which is
+    // what curl and a one-off test want.
+    const batch = Array.isArray(req.body) ? req.body : [req.body];
+    if (batch.length === 0 || batch.length > MAX_BATCH) {
+      res.status(400).json({ error: `send between 1 and ${MAX_BATCH} memories` });
       return;
     }
 
-    const result = await ingest(database ?? db(), extract, embed, parsed.memory);
-    res.status(200).json(result);
+    const parsed = batch.map(parseMemory);
+    const invalid = parsed.flatMap((result, index) => (result.ok ? [] : [{ index, errors: result.errors }]));
+    if (invalid.length > 0) {
+      res.status(400).json({ error: "invalid memory", invalid });
+      return;
+    }
+
+    const results = await ingest(
+      database ?? db(),
+      extract,
+      embed,
+      parsed.map((result) => (result as { ok: true; memory: IncomingMemory }).memory),
+    );
+
+    // 503 when a model call failed for a reason that may pass: the memories are
+    // stored, and the phone sending them again later is what enriches them. A
+    // 200 would mark them synced on the phone and leave them unenriched for good.
+    const status = results.some((result) => result.retryable) ? 503 : 200;
+    res.status(status).json(Array.isArray(req.body) ? { results } : results[0]);
   });
 
   // JSON, never Express's HTML pages: the only client parses JSON.
