@@ -233,13 +233,15 @@ private fun RowThumbnail(memory: Memory) {
             MemoryType.IMAGE, MemoryType.PDF -> {
                 val picture = rememberThumbnail(memory, targetPx = 140)
                 when {
-                    picture != null -> Image(
-                        picture,
-                        null,
-                        contentScale = ContentScale.Crop,
-                        alignment = Alignment.TopCenter,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    picture != null -> TravellingPicture(memory.id) { travel ->
+                        Image(
+                            picture,
+                            null,
+                            contentScale = ContentScale.Crop,
+                            alignment = Alignment.TopCenter,
+                            modifier = Modifier.fillMaxSize().then(travel),
+                        )
+                    }
                     memory.type == MemoryType.PDF -> DocumentGlyph(Modifier.size(width = 24.dp, height = 30.dp))
                 }
             }

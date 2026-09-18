@@ -268,7 +268,16 @@ private fun PictureTile(memory: Memory, now: Long) {
         val height = picture?.let { (maxWidth * (it.height.toFloat() / it.width)).coerceIn(150.dp, 270.dp) } ?: 190.dp
         Box(Modifier.fillMaxWidth().height(height).background(InkMedia)) {
             picture?.let {
-                Image(it, null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
+                // lent to the sheet while this memory is open: it flies up into it, and back
+                TravellingPicture(memory.id) { travel ->
+                    Image(
+                        it,
+                        null,
+                        contentScale = ContentScale.Crop,
+                        alignment = Alignment.TopCenter,
+                        modifier = Modifier.fillMaxSize().then(travel),
+                    )
+                }
             }
             Column(
                 Modifier
@@ -304,13 +313,15 @@ private fun DocumentTile(memory: Memory, now: Long) {
             .padding(start = 13.dp, end = 13.dp, top = 13.dp),
     ) {
         if (page != null) {
-            Image(
-                page,
-                null,
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.TopCenter,
-                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)),
-            )
+            TravellingPicture(memory.id) { travel ->
+                Image(
+                    page,
+                    null,
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                    modifier = Modifier.fillMaxSize().then(travel).clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)),
+                )
+            }
         } else {
             DocumentGlyph(Modifier.align(Alignment.Center).size(width = 40.dp, height = 52.dp))
         }
