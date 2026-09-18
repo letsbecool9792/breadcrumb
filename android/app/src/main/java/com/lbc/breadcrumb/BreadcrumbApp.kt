@@ -6,6 +6,7 @@ import com.lbc.breadcrumb.data.OriginalStore
 import com.lbc.breadcrumb.net.ServerClient
 import com.lbc.breadcrumb.ocr.MlKitOcrReader
 import com.lbc.breadcrumb.ocr.OcrQueue
+import com.lbc.breadcrumb.ocr.PdfReader
 import com.lbc.breadcrumb.sync.UploadWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,11 +46,14 @@ class BreadcrumbApp : Application() {
         // none of it -- not even the database builder -- runs on the main
         // thread during that cold start.
         applicationScope.launch {
+            // one recognizer, for pictures and for PDF pages with no text layer
+            val ocr = MlKitOcrReader()
             OcrQueue(
                 dao = BreadcrumbDatabase.get(this@BreadcrumbApp).memoryDao(),
                 store = OriginalStore(this@BreadcrumbApp),
-                reader = MlKitOcrReader(),
+                reader = ocr,
                 onRead = { UploadWorker.schedule(this@BreadcrumbApp) },
+                documents = PdfReader(ocr),
             ).run()
         }
     }

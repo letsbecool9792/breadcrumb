@@ -441,6 +441,18 @@ class MemoryUploaderTest {
     }
 
     @Test
+    fun aFreshPdfWaitsForItsTextToo() = runBlocking {
+        dao.upsert(Memory(id = "notes", type = MemoryType.PDF, localUri = "file:///originals/notes.pdf", capturedAt = 9_500))
+
+        uploader(now = 10_000).uploadPending()
+        assertTrue("an unread PDF should not be sent yet", sent.isEmpty())
+
+        dao.setExtractedText("notes", "Data Structures, week 6", now = 9_600)
+        uploader(now = 10_000).uploadPending()
+        assertEquals(listOf("notes"), sent)
+    }
+
+    @Test
     fun anImageOcrNeverFinishedIsSentAnyway() = runBlocking {
         // otherwise a read that always fails would keep the memory off the server for good
         savedImage("stubborn", capturedAt = 1_000)

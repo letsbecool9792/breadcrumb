@@ -101,6 +101,13 @@ object ResultText {
         return if (line.length <= max) line else line.substring(0, max).substringBeforeLast(' ').trimEnd() + "…"
     }
 
+    /** The start of a long text, cut at a word, with an ellipsis; a short one whole. */
+    fun opening(text: String, max: Int): String {
+        if (text.length <= max) return text
+        val cut = text.substring(0, max)
+        return cut.substringBeforeLast(' ', cut).trimEnd() + " …"
+    }
+
     /** Where a link goes, as a person names the site. */
     fun host(memory: Memory): String? = UrlText.firstHost(memory.rawText)
 
