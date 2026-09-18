@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.lbc.breadcrumb.R
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
+import com.lbc.breadcrumb.ui.common.CrumbTrail
 import com.lbc.breadcrumb.ui.common.DocumentGlyph
 import com.lbc.breadcrumb.ui.common.NoteGlyph
 import com.lbc.breadcrumb.ui.common.rememberThumbnail
@@ -61,8 +62,8 @@ internal fun Results(state: SearchState.Searching, now: Long, onOpen: (Result) -
 
     if (state.results.isEmpty()) {
         when (state.status) {
-            // the counter already says "searching…"; an empty list is not an answer yet
-            SearchStatus.RANKING -> Unit
+            // nothing yet, and no answer yet either: the trail walks, large, where results will be
+            SearchStatus.RANKING -> CrumbTrail(Modifier.padding(start = 28.dp, top = 36.dp).size(44.dp), walking = true)
             SearchStatus.RANKED -> Quiet(stringResource(R.string.results_nothing), stringResource(R.string.results_nothing_hint))
             SearchStatus.OFFLINE, SearchStatus.UNAVAILABLE ->
                 Quiet(stringResource(R.string.results_words_only), stringResource(R.string.results_words_only_hint))
