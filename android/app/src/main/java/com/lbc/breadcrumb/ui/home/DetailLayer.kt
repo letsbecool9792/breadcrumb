@@ -1,6 +1,6 @@
 package com.lbc.breadcrumb.ui.home
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.lbc.breadcrumb.ui.theme.Ink
 import kotlinx.coroutines.launch
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 
 /**
@@ -87,6 +88,9 @@ private const val CLOSE_MS = 300
 
 /** How far down, as a share of its height, a sheet must be pulled for letting go to dismiss it. */
 private const val DISMISS_AT = 0.22f
+
+/** How far down, as a share of its height, a back swipe carries a sheet by the time it is complete. */
+private const val BACK_TRAVEL = 0.3f
 
 /**
  * A memory's picture where it sits in a tile or a result row. While that
@@ -130,9 +134,10 @@ internal fun Modifier.travelling(memoryId: String, scope: AnimatedVisibilityScop
  * into it from its tile.
  *
  * Never the whole screen: at most [maxFraction] of it, the mosaic or list
- * it was opened from dimmed but in sight above. Dismissed by Back, by a tap
- * on what it dims, or by dragging it down -- from its grabber, or from the
- * top of its content once that is scrolled back up.
+ * it was opened from dimmed but in sight above. Dismissed by Back -- which it
+ * follows as the swipe is made -- by a tap on what it dims, or by dragging it
+ * down, from its grabber or from the top of its content once that is
+ * scrolled back up. It stands on the keyboard when one is up.
  *
  * @param content given the visibility scope that pictures travel within.
  */
@@ -157,15 +162,32 @@ internal fun <T : Any> SheetLayer(
         var drag by remember { mutableFloatStateOf(0f) }
         var sheetHeight by remember { mutableIntStateOf(1) }
 
-        BackHandler(onBack = onDismiss)
+        // Back, predictively: the sheet follows the swipe down as it is made,
+        // closes when it is let go, and settles back if it is taken back --
+        // the same motion as pulling it down by hand.
+        var backing by remember { mutableStateOf(false) }
+        PredictiveBackHandler { progress ->
+            backing = true
+            try {
+                progress.collect { event -> drag = sheetHeight * BACK_TRAVEL * event.progress }
+                onDismiss()
+            } catch (_: CancellationException) {
+                scope.launch { animate(drag, 0f, animationSpec = spring(stiffness = 500f)) { value, _ -> drag = value } }
+            } finally {
+                backing = false
+            }
+        }
 
-        // a tap under the thumb as a pull crosses the point where letting go dismisses
+        // a tap under the thumb as a pull crosses the point where letting go
+        // dismisses -- not for a back swipe, where letting go always does
         val haptics = LocalHapticFeedback.current
         LaunchedEffect(Unit) {
             snapshotFlow { drag > sheetHeight * DISMISS_AT }
                 .distinctUntilChanged()
                 .drop(1)
-                .collect { past -> if (past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
+                .collect { past ->
+                    if (past && !backing) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                }
         }
 
         fun release(velocity: Float) {
