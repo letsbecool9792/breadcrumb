@@ -189,6 +189,9 @@ npm run typecheck
 - **A model call that may succeed later must answer 503, never 200.** A 200 marks the memory synced on the phone, and nothing re-enriches it afterwards — the phone re-sending it *is* the re-enrichment path.
 - **Pictures reach the server as base64 JSON and are never written anywhere**, not even a temp file (rule 1). `/memories/images` only reads pictures for memories it already holds; the phone sends memories first and pictures after, in the same worker run.
 - **OCR must ask for an upload pass after *every* read, including one that found nothing.** Images are held back until OCR has looked at them, and an empty read is the very case whose picture gets sent — skip the signal and those photos wait for the next save or launch.
+- **A missing search index is not an error.** `$vectorSearch` against an index that does not exist answers an empty list, so a search that found nothing and an index never created look the same. Startup creates the index and says so; if search returns nothing at all, check the index before the query.
+- **A new search index takes ~30s on M0 to become queryable**, and M0 allows three per *cluster*. Search tests build a throwaway index on their own test collection and drop the collection afterwards, which is most of that suite's run time. Real indexes plus the tests' temporary ones must fit in three at once.
+- **Search results are an allow-list projection** (`vectorSearchPipeline`). The text goes back whole; the vector never leaves. A field added to the document stays in the cloud until it is listed.
 - **Live model tests skip themselves when Gemini is overloaded** (503/429 after retries). A third party's capacity is not something to fail a build over — but a skip is not a pass, so read the run's skip lines.
 
 ### Editors
@@ -414,18 +417,36 @@ Do not start the next step until the current one is ticked. Do not batch several
 
 ### Phase 4 — Retrieval
 
-- [ ] **4.1** `/search`: embed query → vector search → ranked results
+**Order changed 2026-09-18:** 4.4 comes straight after 4.1, before the UI. A keyword query
+("government") against real data showed vector-only search ranking noise, and a UI tested on
+that would feel broken for exactly what people type. 4.3 then adds its filters to both halves.
+
+- [x] **4.1** `/search`: embed query → vector search → ranked results
+      · *test:* `npm test` in `server/` — `parseSearch`; the route's refusals and model failures
+        (400, 503 retryable, 502) proved never to reach the database; and against real Atlas,
+        on a throwaway 4-dim index: nearest first, the phrase embedded as a *query*, the result
+        shape, an unembedded memory never a result, the limit
       · *test:* curl a natural-language query, get sensible hits
+      · `GET /search?q=&limit=` — exact nearest neighbours, not approximate (Atlas's advice
+        under ~10k documents; no `numCandidates` to tune, and exact under 4.3's pre-filters)
+      · results carry the text in full (`rawText`, `extractedText`, `readText`) plus summary and
+        kind, so a result is readable without the phone; the vector never leaves
+      · verified by the user with curl against the real collection: results readable. A keyword
+        query ("government") ranked the only memory containing the word fourth, the top five
+        within 0.003 of each other — rule 5's weakness, exactly as predicted, left to 4.4
+- [~] **4.4** Hybrid search via `$rankFusion` (rule #5) — *moved ahead of 4.2, see above*
+      · *test:* a proper-noun query ("Qualcomm") beats the pure-vector baseline
+      · *test:* "government" puts the one screenshot containing it first
 - [ ] **4.2** Real search UI, replacing the debug list
       · *test:* type a query on device, see ranked results
+      · **deletes do not sync**, so the server holds memories the phone has deleted (16 there
+        against 6 on the phone, 2026-09-18). Drop result ids the phone does not hold
 - [ ] **4.3** Flash-Lite query parsing → type and date filters (rule #6)
       · *test:* *"screenshot from April"* filters by both type and month
       · *test:* *"that link from WhatsApp"* also finds photos whose caption carried a link
         (filter on `type = LINK OR hasLink`)
       · parsing must also extract a **source app** filter, matched against
         `sourceAppLabel` — provenance is a filter, never mixed into embedded text
-- [ ] **4.4** Hybrid search via `$rankFusion` (rule #5)
-      · *test:* a proper-noun query ("Qualcomm") beats the pure-vector baseline
 - [ ] **4.5** Tap a result → open the original artifact
       · *test:* tap a saved screenshot → opens in a viewer
       · *test:* tap a saved PDF → opens in a PDF viewer (originals are app-private, so
