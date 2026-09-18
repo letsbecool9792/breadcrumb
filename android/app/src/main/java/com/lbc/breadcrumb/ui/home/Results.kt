@@ -114,7 +114,7 @@ private fun ResultRow(result: Result, words: List<String>, now: Long, lifted: Bo
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(
                 text = title,
-                style = TextStyle(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Medium, color = Bone),
+                style = serif(19.sp, lineHeight = 22.sp),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )

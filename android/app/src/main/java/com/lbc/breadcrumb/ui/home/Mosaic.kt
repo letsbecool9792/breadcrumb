@@ -165,7 +165,7 @@ private fun LinkTile(memory: Memory, now: Long) {
         }
         Text(
             text = ResultText.title(memory),
-            style = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, color = Bone),
+            style = serif(18.sp, lineHeight = 20.sp),
             maxLines = 4,
             overflow = TextOverflow.Ellipsis,
         )
@@ -179,7 +179,7 @@ private fun NoteTile(memory: Memory, now: Long) {
     Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
         Text(
             text = memory.rawText?.trim().orEmpty().ifEmpty { ResultText.title(memory) },
-            style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, color = Bone),
+            style = sans(14.sp, lineHeight = 20.sp),
             maxLines = 8,
             overflow = TextOverflow.Ellipsis,
         )
@@ -196,7 +196,7 @@ private fun Caption(title: String?, meta: String) {
         title?.let {
             Text(
                 text = it,
-                style = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium, color = Bone),
+                style = serif(17.sp, lineHeight = 19.sp),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )

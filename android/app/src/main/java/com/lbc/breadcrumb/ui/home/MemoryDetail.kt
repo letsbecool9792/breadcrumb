@@ -224,7 +224,7 @@ private fun LinkCard(memory: Memory, onOpen: () -> Unit) {
         }
         Text(
             text = ResultText.title(memory),
-            style = TextStyle(fontSize = 19.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium, color = Bone),
+            style = serif(25.sp, lineHeight = 28.sp),
         )
         memory.rawText?.takeIf { memory.title != null }?.let {
             SelectionContainer {
@@ -241,7 +241,7 @@ private fun Note(memory: Memory) {
         SelectionContainer {
             Text(
                 text = memory.rawText?.trim().orEmpty().ifEmpty { ResultText.title(memory) },
-                style = TextStyle(fontSize = 17.sp, lineHeight = 25.sp, color = Bone),
+                style = sans(17.sp, lineHeight = 25.sp),
             )
         }
     }
@@ -264,13 +264,13 @@ private fun Heading(memory: Memory, summary: String?) {
     if (title == null && caption == null && description == null) return
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
         title?.let {
-            Text(it, style = TextStyle(fontSize = 21.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold, color = Bone))
+            Text(it, style = serif(30.sp, lineHeight = 32.sp))
         }
         caption?.let {
-            SelectionContainer { Text(it, style = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, color = Bone)) }
+            SelectionContainer { Text(it, style = sans(15.sp, lineHeight = 22.sp)) }
         }
         description?.let {
-            Text(it, style = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, color = BoneDim))
+            Text(it, style = sans(15.sp, BoneDim, lineHeight = 22.sp))
         }
     }
 }
@@ -350,7 +350,7 @@ private fun Actions(action: OriginalAction, onOpen: () -> Unit, onDelete: () -> 
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(label, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = ink))
+            Text(label, style = sans(15.sp, ink, FontWeight.SemiBold))
             if (action is OriginalAction.ViewFile || action is OriginalAction.ViewUrl) {
                 Box(Modifier.width(8.dp))
                 LeavesTheApp(ink)
