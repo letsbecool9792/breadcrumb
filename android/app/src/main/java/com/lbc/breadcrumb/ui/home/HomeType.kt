@@ -8,7 +8,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -24,17 +23,15 @@ import com.lbc.breadcrumb.ui.theme.Serif
 
 internal val MonoFamily = Mono
 
-/** What a thing is called. Instrument Serif runs small for its size, so titles sit a step larger than sans would. */
-internal fun serif(size: TextUnit, color: Color = Bone, lineHeight: TextUnit = size * 1.12f, italic: Boolean = false) =
-    TextStyle(
-        fontFamily = Serif,
-        fontSize = size,
-        lineHeight = lineHeight,
-        color = color,
-        fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
-    )
+/**
+ * The app's voice, and a memory once it is opened: the wordmark, a detail's
+ * title, a note read in full. Never a title among others on the page -- those
+ * are [sans], whatever kind of memory they belong to.
+ */
+internal fun serif(size: TextUnit, color: Color = Bone, lineHeight: TextUnit = size * 1.15f) =
+    TextStyle(fontFamily = Serif, fontSize = size, lineHeight = lineHeight, color = color)
 
-/** What the user saved: captions, notes, the model's summaries. */
+/** Everything on the page: tile and row titles, captions, notes, the model's summaries. */
 internal fun sans(
     size: TextUnit,
     color: Color = Bone,
@@ -52,7 +49,7 @@ internal val metaStyle = monoStyle(10.sp, InkOutline).copy(letterSpacing = 0.3.s
 @Composable
 internal fun Quiet(title: String, hint: String) {
     Column(Modifier.padding(horizontal = 26.dp, vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Text(title, style = serif(26.sp))
+        Text(title, style = serif(22.sp))
         Text(hint, style = monoStyle(11.sp, InkOutline).copy(lineHeight = 18.sp))
     }
 }

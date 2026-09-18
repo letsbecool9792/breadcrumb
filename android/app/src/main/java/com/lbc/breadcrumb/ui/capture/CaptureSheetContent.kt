@@ -99,8 +99,8 @@ private fun Header(state: CaptureUiState, saved: List<Memory>) {
             Text(
                 text = title(state),
                 fontFamily = Serif,
-                fontSize = 27.sp,
-                lineHeight = 29.sp,
+                fontSize = 23.sp,
+                lineHeight = 27.sp,
                 color = colors.onSurface,
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
@@ -263,9 +263,9 @@ private fun DocumentPreview(preview: CapturePreview.Document) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
                 Text(
                     text = preview.title ?: stringResource(R.string.capture_document),
-                    fontFamily = Serif,
-                    fontSize = 20.sp,
-                    lineHeight = 22.sp,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 21.sp,
                     color = colors.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -313,9 +313,9 @@ private fun LinkPreview(preview: CapturePreview.Link) {
         }
         Text(
             text = preview.headline,
-            fontFamily = Serif,
-            fontSize = 21.sp,
-            lineHeight = 23.sp,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+            lineHeight = 22.sp,
             color = colors.onSurface,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
