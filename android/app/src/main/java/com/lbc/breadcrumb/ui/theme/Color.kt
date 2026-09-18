@@ -33,3 +33,12 @@ val CrumbBright = Color(0xFFFFC46B)
 
 /** Dims the host app behind the capture sheet. */
 val CaptureScrim = Color(0xFF080605)
+
+// The search screens (design boards 1-3). The app is a frame around other
+// people's screenshots, so everything here sits a step off the ink.
+/** Behind a thumbnail or a page: a shade under the lifted surface. */
+val InkMedia = Color(0xFF1C1713)
+/** The search field's edge at rest; it turns [AmberContainerDark] while typing. */
+val InkFieldBorder = Color(0xFF322A23)
+/** Behind the matched word in a result's fragment. */
+val HitBackground = Color(0xFF3A2C14)

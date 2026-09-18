@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Breadcrumb" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Ink behind the window too, so nothing flashes white between the
+         splash and the first frame, or as the keyboard resizes the window. -->
+    <style name="Theme.Breadcrumb" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/brand_ink</item>
+    </style>
 
     <!-- Applied to the launcher activity; hands off to Theme.Breadcrumb once
          installSplashScreen() runs. Attribute names are unprefixed because they

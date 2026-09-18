@@ -64,9 +64,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Temporary. Exists so saves are visible while the capture surfaces are built
- * in phase 1, and so local search (2.2) can be tried; the real search-first UI
- * replaces it at step 4.2.
+ * The old debug list, from before the search screens (4.2). Kept for what they
+ * do not show -- the server's status, the upload queue, a Sync button, sample
+ * rows -- and reached only in debug builds, by long-pressing the wordmark.
  *
  * Uses text glyphs rather than Material icons on purpose -- a throwaway screen
  * is not worth an extra dependency.

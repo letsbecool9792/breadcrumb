@@ -1,0 +1,167 @@
+package com.lbc.breadcrumb.ui.home
+
+import android.app.Application
+import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.lbc.breadcrumb.BreadcrumbApp
+import com.lbc.breadcrumb.data.BreadcrumbDatabase
+import com.lbc.breadcrumb.data.FtsQuery
+import com.lbc.breadcrumb.data.Memory
+import com.lbc.breadcrumb.net.Interpretation
+import com.lbc.breadcrumb.net.SearchHit
+import com.lbc.breadcrumb.net.SearchOutcome
+import com.lbc.breadcrumb.sync.UploadWorker
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+/** A result on screen: the phone's own row, and what the server said about it when it ranked it. */
+data class Result(val memory: Memory, val hit: SearchHit?)
+
+/** Where a search has got to, which is what the line over the results says. */
+enum class SearchStatus {
+    /** Showing the phone's own word matches while the ranked answer is on its way. */
+    RANKING,
+    RANKED,
+    /** The server could not be reached; the phone's word matches stand. */
+    OFFLINE,
+    /** The server answered but could not search -- a busy model, say. */
+    UNAVAILABLE,
+}
+
+sealed interface SearchState {
+    /** No search: the mosaic. */
+    data object Resting : SearchState
+
+    data class Searching(
+        val phrase: String,
+        val results: List<Result>,
+        /** How the server read the phrase (4.3); null until it answers, or when it could not. */
+        val interpretation: Interpretation?,
+        val status: SearchStatus,
+    ) : SearchState
+}
+
+/**
+ * The search screen (steps 4.2 and 4.5): everything kept, a search over it,
+ * and one memory opened.
+ *
+ * A search shows two answers in turn. The phone's own word index (step 2.2)
+ * answers at once and offline; the server's ranked search (4.1-4.4) answers a
+ * moment later and replaces it. So typing always shows something, and a
+ * search still works -- by words alone -- when the server does not.
+ */
+class HomeViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val dao = BreadcrumbDatabase.get(app).memoryDao()
+    private val server = (app as BreadcrumbApp).server
+
+    /** Everything kept, newest first. Null until Room first answers, so launch never flashes an empty archive. */
+    val memories: StateFlow<List<Memory>?> = dao.observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Saves the server has not seen yet, which ranked search cannot find. */
+    val unsent: StateFlow<Int> = dao.observeUnsyncedCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    /** Compose state rather than a flow: a text field fed from a flow can drop keystrokes. */
+    var query by mutableStateOf("")
+        private set
+
+    var search by mutableStateOf<SearchState>(SearchState.Resting)
+        private set
+
+    /** The memory shown in detail (4.5), if any. */
+    var opened by mutableStateOf<Result?>(null)
+        private set
+
+    init {
+        // Catch-up: anything left queued by an earlier run, or saved offline,
+        // goes out as soon as there is a network.
+        UploadWorker.schedule(app)
+
+        viewModelScope.launch {
+            snapshotFlow { normalize(query) }
+                .distinctUntilChanged()
+                // a new keystroke abandons the search in flight, server call included
+                .collectLatest(::run)
+        }
+    }
+
+    fun onQueryChange(text: String) {
+        query = text
+    }
+
+    fun clear() {
+        query = ""
+    }
+
+    fun open(result: Result) {
+        opened = result
+    }
+
+    fun close() {
+        opened = null
+    }
+
+    private suspend fun run(phrase: String) {
+        if (phrase.isEmpty()) {
+            search = SearchState.Resting
+            return
+        }
+
+        val local = localMatches(phrase)
+        search = SearchState.Searching(phrase, local, interpretation = null, SearchStatus.RANKING)
+
+        // Wait for a pause in the typing: each ranked search is a model call
+        // on a free tier, and "q", "qu", "qua" are not searches anyone meant.
+        delay(PAUSE_MS)
+
+        search = when (val outcome = server.search(phrase, LIMIT)) {
+            is SearchOutcome.Found ->
+                SearchState.Searching(phrase, ranked(outcome.hits), outcome.interpretation, SearchStatus.RANKED)
+            is SearchOutcome.Unavailable -> {
+                Log.w(TAG, "ranked search unavailable, showing word matches: ${outcome.reason}")
+                val status = if (outcome.offline) SearchStatus.OFFLINE else SearchStatus.UNAVAILABLE
+                SearchState.Searching(phrase, local, interpretation = null, status)
+            }
+        }
+    }
+
+    private suspend fun localMatches(phrase: String): List<Result> {
+        val match = FtsQuery.matchExpression(phrase) ?: return emptyList()
+        return dao.searchOnce(match, LIMIT).map { Result(it, hit = null) }
+    }
+
+    private suspend fun ranked(hits: List<SearchHit>): List<Result> =
+        join(hits, dao.getByIds(hits.map { it.id }).associateBy { it.id })
+
+    companion object {
+        private const val TAG = "Home"
+
+        /** Long enough to span a word being typed, short enough to feel like search-as-you-type. */
+        const val PAUSE_MS = 450L
+
+        const val LIMIT = 30
+
+        /** "  qualcomm   intern " and "qualcomm intern" are one search. */
+        fun normalize(text: String): String = text.trim().replace(Regex("""\s+"""), " ")
+
+        /**
+         * The server's order, the phone's rows. A hit the phone does not hold
+         * is a memory deleted here that the server still has -- deletes do not
+         * sync -- and is dropped rather than shown as something that cannot open.
+         */
+        fun join(hits: List<SearchHit>, held: Map<String, Memory>): List<Result> =
+            hits.mapNotNull { hit -> held[hit.id]?.let { Result(it, hit) } }
+    }
+}

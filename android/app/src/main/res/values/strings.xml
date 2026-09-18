@@ -19,4 +19,15 @@
     <string name="capture_clipboard_empty">Clipboard is empty</string>
     <string name="capture_clipboard_sensitive">Not saved: clipboard is marked sensitive</string>
     <string name="capture_clipboard_unreadable">Couldn\'t read the clipboard</string>
+
+    <!-- The search screens (design boards 1-3). Chrome is lowercase mono. -->
+    <string name="home_wordmark">breadcrumb</string>
+    <string name="search_hint">search your memory</string>
+    <string name="search_clear">Clear search</string>
+    <string name="archive_empty">Nothing kept yet</string>
+    <string name="archive_empty_hint">share anything to breadcrumb, or copy it\nand tap the breadcrumb tile</string>
+    <string name="results_nothing">Nothing matches that</string>
+    <string name="results_nothing_hint">try fewer words, or describe it\nthe way you\'d say it out loud</string>
+    <string name="results_words_only">No saved words match</string>
+    <string name="results_words_only_hint">ranked search is out of reach, so this\nlooked for the words themselves</string>
 </resources>

@@ -29,10 +29,13 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Breadcrumb">
+        <!-- adjustResize: the search field sits just above the keyboard, as
+             design board 2 draws it, rather than the whole window panning. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Breadcrumb.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
