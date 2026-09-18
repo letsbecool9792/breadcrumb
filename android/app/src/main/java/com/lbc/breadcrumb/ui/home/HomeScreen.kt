@@ -118,6 +118,8 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
                 .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 16.dp),
         )
     }
+
+    viewModel.opened?.let { MemoryDetail(it, now, onDismiss = viewModel::close) }
 }
 
 /** Near-zero chrome: the wordmark and a count at rest, the result counter while searching. */

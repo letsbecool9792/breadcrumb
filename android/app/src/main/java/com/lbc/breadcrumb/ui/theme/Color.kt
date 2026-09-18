@@ -40,5 +40,9 @@ val CaptureScrim = Color(0xFF080605)
 val InkMedia = Color(0xFF1C1713)
 /** The search field's edge at rest; it turns [AmberContainerDark] while typing. */
 val InkFieldBorder = Color(0xFF322A23)
+/** The sheet's grabber and the empty half of a placeholder line. */
+val InkGrabber = Color(0xFF3A322A)
+/** Section labels that should barely be there ("text found"). */
+val InkLabel = Color(0xFF5A4E44)
 /** Behind the matched word in a result's fragment. */
 val HitBackground = Color(0xFF3A2C14)
