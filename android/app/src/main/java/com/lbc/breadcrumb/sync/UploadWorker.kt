@@ -1,6 +1,8 @@
 package com.lbc.breadcrumb.sync
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -39,6 +41,15 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             return Result.retry()
         }
 
+        // Links' pages before the uploads, so a link goes up with its page in
+        // one send. Read from the phone, never the server.
+        val pagesRead = LinkReading(
+            dao = BreadcrumbDatabase.get(applicationContext).memoryDao(),
+            read = app.pages::read,
+            isOnline = ::isOnline,
+        ).readAll()
+        if (pagesRead > 0) Log.i(TAG, "read $pagesRead links' pages")
+
         // Memories next: a picture is only read for a memory the server holds.
         val memories = uploader.uploadPending()
         if (memories is UploadOutcome.RetryLater) {
@@ -64,6 +75,13 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             Log.i(TAG, "deleted ${counts[0]}, uploaded ${counts[1]}, read ${counts[2]} pictures, copied ${counts[3]} enrichments")
         }
         return Result.success()
+    }
+
+    /** A network that has been seen to reach the internet, not merely one that is up. */
+    private fun isOnline(): Boolean {
+        val connectivity = applicationContext.getSystemService(ConnectivityManager::class.java) ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
     companion object {

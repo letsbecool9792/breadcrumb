@@ -434,7 +434,9 @@ private fun Provenance(memory: Memory, now: Long) {
 private fun FoundText(memory: Memory, readText: String?) {
     val sections = listOfNotNull(
         memory.extractedText?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            stringResource(R.string.detail_text_found) to ResultText.opening(it, FOUND_TEXT_SHOWN)
+            // a link's is what its page said of itself; anything else's, words read off it
+            val label = if (memory.type == MemoryType.LINK) R.string.detail_from_page else R.string.detail_text_found
+            stringResource(label) to ResultText.opening(it, FOUND_TEXT_SHOWN)
         },
         readText?.trim()?.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.detail_seen) to it },
     )

@@ -3,6 +3,7 @@ package com.lbc.breadcrumb
 import android.app.Application
 import com.lbc.breadcrumb.data.BreadcrumbDatabase
 import com.lbc.breadcrumb.data.OriginalStore
+import com.lbc.breadcrumb.net.PageReader
 import com.lbc.breadcrumb.net.ServerClient
 import com.lbc.breadcrumb.ocr.MlKitOcrReader
 import com.lbc.breadcrumb.ocr.OcrQueue
@@ -28,6 +29,9 @@ class BreadcrumbApp : Application() {
 
     /** Lazy: a capture process never talks to the server, so never builds a client. */
     val server: ServerClient by lazy { ServerClient(BuildConfig.SERVER_URL) }
+
+    /** Reads saved links' pages (the upload worker's first step). */
+    val pages: PageReader by lazy { PageReader() }
 
     /**
      * Memories the upload queue must leave for now: saved, but with their

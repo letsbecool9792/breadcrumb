@@ -72,11 +72,11 @@ interface MemoryDao {
      * is how those get another chance, once something has changed.
      */
     /**
-     * @param ocrDeadline an image or PDF saved after this is held back while
-     *   the phone has still to read it: sending it now costs a Gemini pass on a
-     *   memory whose words arrive seconds later, and another when they do.
-     *   Older ones go regardless, so a read that never finishes cannot strand
-     *   a memory off the server.
+     * @param ocrDeadline an image, PDF or link saved after this is held back
+     *   while the phone has still to read it -- or, for a link, its page:
+     *   sending it now costs a Gemini pass on a memory whose words arrive
+     *   seconds later, and another when they do. Older ones go regardless, so
+     *   a read that never finishes cannot strand a memory off the server.
      * @param exclude ids held back for now -- memories whose capture sheet is
      *   still open, where a note may yet be written.
      */
@@ -84,6 +84,7 @@ interface MemoryDao {
         "SELECT * FROM memories WHERE syncState = 'PENDING' " +
             "AND NOT (type IN ('IMAGE', 'PDF') AND extractedText IS NULL AND localUri IS NOT NULL " +
             "AND capturedAt > :ocrDeadline) " +
+            "AND NOT (type = 'LINK' AND extractedText IS NULL AND capturedAt > :ocrDeadline) " +
             "AND id NOT IN (:exclude) " +
             "ORDER BY capturedAt ASC LIMIT :limit"
     )
@@ -282,6 +283,33 @@ interface MemoryDao {
             "WHERE id = :id AND extractedText IS NULL"
     )
     suspend fun setExtractedText(id: String, text: String, now: Long)
+
+    /**
+     * Links whose page has not been read yet, newest first -- every link saved
+     * before pages were read among them.
+     */
+    @Query(
+        "SELECT * FROM memories WHERE type = 'LINK' AND extractedText IS NULL " +
+            "ORDER BY capturedAt DESC LIMIT :limit"
+    )
+    suspend fun unreadLinks(limit: Int): List<Memory>
+
+    /**
+     * Keeps what a link's page said about itself: its title, when the memory
+     * has none of its own -- a share from Chrome brings one; a copied link
+     * does not -- and its description as the read text. Empty text means read
+     * and nothing found, as for OCR.
+     *
+     * Queues the memory again when that gave the server something new, from
+     * UPLOADING too, as [setExtractedText] does. Only fills a link still unread.
+     */
+    @Query(
+        "UPDATE memories SET title = COALESCE(title, :title), extractedText = :text, updatedAt = :now, " +
+            "syncState = CASE WHEN :text != '' OR (title IS NULL AND :title IS NOT NULL) " +
+            "THEN 'PENDING' ELSE syncState END " +
+            "WHERE id = :id AND extractedText IS NULL"
+    )
+    suspend fun setPageReading(id: String, title: String?, text: String, now: Long): Int
 
     /**
      * Writes the person's note, and queues the memory to be sent again so the

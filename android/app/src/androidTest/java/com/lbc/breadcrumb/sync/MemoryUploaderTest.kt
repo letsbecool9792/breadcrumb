@@ -453,6 +453,20 @@ class MemoryUploaderTest {
     }
 
     @Test
+    fun aFreshLinkWaitsForItsPage() = runBlocking {
+        dao.upsert(Memory(id = "reel", type = MemoryType.LINK, rawText = "https://example.com/reel", capturedAt = 9_500))
+        dao.upsert(Memory(id = "old", type = MemoryType.LINK, rawText = "https://example.com/old", capturedAt = 1_000))
+
+        uploader(now = 10_000).uploadPending()
+
+        // the fresh one waits for its page; one never read goes anyway, as with OCR
+        assertEquals(listOf("old"), sent)
+        dao.setPageReading("reel", "A reel", "", now = 9_600)
+        uploader(now = 10_000).uploadPending()
+        assertEquals(listOf("old", "reel"), sent)
+    }
+
+    @Test
     fun anImageOcrNeverFinishedIsSentAnyway() = runBlocking {
         // otherwise a read that always fails would keep the memory off the server for good
         savedImage("stubborn", capturedAt = 1_000)
