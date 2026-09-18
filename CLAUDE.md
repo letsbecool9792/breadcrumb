@@ -143,7 +143,7 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **Nothing calls OCR.** `OcrQueue` starts in `BreadcrumbApp.onCreate` — every process, capture included — and watches Room for unread images. Any code that inserts IMAGE rows, the 5.1 importer included, gets them read without doing anything.
 - **ML Kit reports usage to Google — accepted, 2026-09-15.** Its logging queue shows up as `databases/com.google.android.datatransport.events` in app storage. What it sends is SDK usage and performance data, not images or recognized text, so rule 1's stance holds: originals and their text stay on the device. Accepted rather than stripped, since removing the transport service by manifest merge is unsupported and could break on an ML Kit update. Revisit if the privacy stance tightens.
 - **A Text given a style takes nothing from the theme**, so every style names its face — use the helpers in `ui/home/HomeType.kt` (`serif`, `sans`, `monoStyle`), never a bare `TextStyle(fontSize = …)`, which falls back to the platform font. Text given only loose parameters (as the capture sheet's are) inherits Material's type scale, which is set in Instrument Sans.
-- **Serif or sans is decided by where a title sits, never by the kind of memory.** Among others on the page — tiles, result rows, the capture sheet — a memory's title is `sans`; opened in its detail it is `serif`. The serif is otherwise only the app's voice (the wordmark, "Saved", empty states). Fraunces' variable file defaults to weight **900**, so `Type.kt` sets every axis explicitly; a new use of the file must too.
+- **Serif or sans is decided by where a title sits, never by the kind of memory.** Among others on the page — tiles, result rows, the capture sheet — a memory's title is `sans`; opened in its detail it is `serif`. The serif is otherwise only the app's voice (the wordmark, "Saved", empty states).
 - **The detail sheet is the app's own `SheetLayer`, not Material's `ModalBottomSheet`.** A shared-element transition — the picture travelling from its tile — only works within one composition, and Material's sheet lives in a window of its own. `SheetLayer` gives back what Material's gave: a height limit, a scrim that closes it, Back, and drag-to-dismiss handed off from the content's scroll through a nested-scroll connection.
 - **Animations that loop or follow a gesture run only while shown, and are read while drawing** (`graphicsLayer`, `drawBehind`, `Canvas`), not in composition: an infinite transition left running at rest redraws every frame, and reading one in composition recomposes every frame.
 - **Upsert with `@Upsert`, never `@Insert(onConflict = REPLACE)`.** `memories_fts` is an external-content index kept in step by triggers, and REPLACE deletes the old row without firing delete triggers — the old text would stay searchable. `MemorySearchTest` covers it.
@@ -527,11 +527,11 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
       · **built, awaiting the user's check on the phone — the design pass**, agreed
         2026-09-18, on the `design-pass` branch, one commit per piece; the user merges it
         once verified. Built as agreed:
-        - three faces bundled (`res/font`, OFL licences in `assets/licenses`): Fraunces for
-          the serif, Instrument Sans, IBM Plex Mono for chrome; Material's type scale set in
-          them too. Instrument Serif was tried first and dropped as too thin on the ink;
-          Fraunces is the user's brief — ordinary weight, a face not often seen, a little
-          quirky (its WONK axis tilts a few letters)
+        - three faces bundled (`res/font`, OFL licences in `assets/licenses`): Young Serif
+          for the serif, Instrument Sans, IBM Plex Mono for chrome; Material's type scale set
+          in them too. The serif is the user's pick: Instrument Serif was dropped as too thin
+          on the ink, Fraunces tried, and Young Serif chosen — ordinary weight, sturdy, a face
+          not often seen
         - **a memory's title is sans on the page and serif when opened — for every kind**
           (the user's rule, after a first version that went by kind)
         - "breadcrumb" large in the serif at the head of the mosaic, handing over to a slim
