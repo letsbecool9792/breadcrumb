@@ -124,7 +124,8 @@ private fun PictureTile(memory: Memory, now: Long) {
             }
         }
     }
-    Caption(ResultText.firstLine(memory.title ?: memory.rawText), ResultText.tileMeta(memory, now))
+    // a caption or title when it came with one; otherwise the model's line about it, once copied back
+    Caption(ResultText.firstLine(memory.title ?: memory.rawText) ?: memory.summary, ResultText.tileMeta(memory, now))
 }
 
 /** A PDF's first page, standing on its lower edge like a sheet in a tray. */

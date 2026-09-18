@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,10 +39,13 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lbc.breadcrumb.R
@@ -73,36 +77,52 @@ import java.time.ZoneId
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MemoryDetail(result: Result, now: Long, onDismiss: () -> Unit) {
+internal fun MemoryDetail(
+    result: Result,
+    /** The row as it is now: its summary may have been copied back since it was opened. */
+    memory: Memory,
+    now: Long,
+    onDismiss: () -> Unit,
+) {
     val context = LocalContext.current
-    val memory = result.memory
     val action = remember(memory) { Originals.actionFor(context, memory) }
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // a search's answer is the freshest; the phone's copy covers a memory opened from the mosaic
+    val summary = result.hit?.summary ?: memory.summary
+    val readText = result.hit?.readText ?: memory.readText
+
+    // Never the whole screen: the mosaic or the list it was opened from stays
+    // in sight above it, dimmed, so the sheet reads as a layer over them.
+    val window = LocalWindowInfo.current.containerSize
+    val windowHeight = with(LocalDensity.current) { window.height.toDp() }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheet,
         shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
         containerColor = Ink,
         contentColor = Bone,
         scrimColor = Color.Black.copy(alpha = 0.6f),
         dragHandle = { Grabber() },
     ) {
-        Column(
-            Modifier
-                .weight(1f, fill = false)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            Artifact(memory, onOpen = { Originals.perform(context, action) })
+        Column(Modifier.heightIn(max = windowHeight * 0.84f)) {
             Column(
-                Modifier.padding(start = 22.dp, end = 22.dp, top = 22.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
+                Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
             ) {
-                Heading(memory, result.hit?.summary)
-                Provenance(memory, now)
-                FoundText(memory, result.hit?.readText)
+                Artifact(memory, maxPicture = windowHeight * 0.42f, onOpen = { Originals.perform(context, action) })
+                Column(
+                    Modifier.padding(start = 22.dp, end = 22.dp, top = 22.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    Heading(memory, summary)
+                    Provenance(memory, now)
+                    FoundText(memory, readText)
+                }
             }
+            Actions(action = action, onOpen = { Originals.perform(context, action) })
         }
-        ActionButton(action, onClick = { Originals.perform(context, action) })
     }
 }
 
@@ -114,21 +134,26 @@ private fun Grabber() {
 // --- the artifact ------------------------------------------------------------
 
 @Composable
-private fun Artifact(memory: Memory, onOpen: () -> Unit) {
+private fun Artifact(memory: Memory, maxPicture: Dp, onOpen: () -> Unit) {
     when (memory.type) {
-        MemoryType.IMAGE -> Picture(memory, onOpen)
+        MemoryType.IMAGE -> Picture(memory, maxPicture, onOpen)
         MemoryType.PDF -> Page(memory, onOpen)
         MemoryType.LINK -> LinkCard(memory, onOpen)
         MemoryType.TEXT, MemoryType.AUDIO -> Note(memory)
     }
 }
 
-/** The picture itself, following its shape within limits; tapping it opens the original too. */
+/**
+ * The picture itself, following its shape within limits; tapping it opens the
+ * original too. A tall screenshot is cropped from the top at [maxHeight], so
+ * what the sheet says about it is in view without scrolling.
+ */
 @Composable
-private fun Picture(memory: Memory, onOpen: () -> Unit) {
+private fun Picture(memory: Memory, maxHeight: Dp, onOpen: () -> Unit) {
     val picture = rememberThumbnail(memory, targetPx = 1080)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val height = picture?.let { (maxWidth * (it.height.toFloat() / it.width)).coerceIn(200.dp, 460.dp) } ?: 300.dp
+        val tallest = maxHeight.coerceAtLeast(200.dp)
+        val height = picture?.let { (maxWidth * (it.height.toFloat() / it.width)).coerceIn(160.dp, tallest) } ?: 260.dp
         Box(
             Modifier
                 .fillMaxWidth()
@@ -282,8 +307,9 @@ private fun FoundText(memory: Memory, readText: String?) {
 
 // --- the one action ----------------------------------------------------------
 
+/** The one action, and it leaves the app. */
 @Composable
-private fun ActionButton(action: OriginalAction, onClick: () -> Unit) {
+private fun Actions(action: OriginalAction, onOpen: () -> Unit) {
     val enabled = action != OriginalAction.Missing
     val label = stringResource(
         when (action) {
@@ -296,20 +322,25 @@ private fun ActionButton(action: OriginalAction, onClick: () -> Unit) {
     val ink = if (enabled) AmberOnContainer else InkOutline
 
     Row(
-        Modifier
-            .padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 22.dp)
-            .fillMaxWidth()
-            .height(52.dp)
-            .clip(RoundedCornerShape(26.dp))
-            .background(if (enabled) AmberBright else InkElevated)
-            .clickable(enabled = enabled, onClick = onClick),
-        horizontalArrangement = Arrangement.Center,
+        Modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 22.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = ink))
-        if (action is OriginalAction.ViewFile || action is OriginalAction.ViewUrl) {
-            Box(Modifier.width(8.dp))
-            LeavesTheApp(ink)
+        Row(
+            Modifier
+                .weight(1f)
+                .height(52.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .background(if (enabled) AmberBright else InkElevated)
+                .clickable(enabled = enabled, onClick = onOpen),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = ink))
+            if (action is OriginalAction.ViewFile || action is OriginalAction.ViewUrl) {
+                Box(Modifier.width(8.dp))
+                LeavesTheApp(ink)
+            }
         }
     }
 }

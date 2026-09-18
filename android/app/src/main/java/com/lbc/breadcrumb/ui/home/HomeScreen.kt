@@ -108,18 +108,32 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
             )
         }
 
-        SearchField(
-            query = viewModel.query,
-            onQueryChange = viewModel::onQueryChange,
-            onClear = viewModel::clear,
-            modifier = Modifier
+        Column(
+            Modifier
                 .navigationBarsPadding()
                 .imePadding()
                 .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 16.dp),
-        )
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            SearchField(
+                query = viewModel.query,
+                onQueryChange = viewModel::onQueryChange,
+                onClear = viewModel::clear,
+            )
+        }
     }
 
-    viewModel.opened?.let { MemoryDetail(it, now, onDismiss = viewModel::close) }
+    viewModel.opened?.let { opened ->
+        // live, so a summary copied back while it is open appears in place
+        val live by remember(opened.memory.id) { viewModel.observe(opened.memory.id) }
+            .collectAsStateWithLifecycle(initialValue = opened.memory)
+        MemoryDetail(
+            result = opened,
+            memory = live ?: opened.memory,
+            now = now,
+            onDismiss = viewModel::close,
+        )
+    }
 }
 
 /** Near-zero chrome: the wordmark and a count at rest, the result counter while searching. */

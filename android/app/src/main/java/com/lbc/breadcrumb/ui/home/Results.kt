@@ -91,13 +91,12 @@ internal fun Results(state: SearchState.Searching, now: Long, onOpen: (Result) -
 @Composable
 private fun ResultRow(result: Result, words: List<String>, now: Long, lifted: Boolean, onClick: () -> Unit) {
     val memory = result.memory
-    val summary = result.hit?.summary
+    // the search's answer when there is one; the phone's copy while only local matches show
+    val summary = result.hit?.summary ?: memory.summary
+    val readText = result.hit?.readText ?: memory.readText
     val title = ResultText.title(memory, summary)
     val fragment = remember(memory, result.hit, words) {
-        ResultText.fragment(
-            listOf(memory.rawText, memory.extractedText, result.hit?.readText, memory.title, summary),
-            words,
-        )
+        ResultText.fragment(listOf(memory.rawText, memory.extractedText, readText, memory.title, summary), words)
     }
 
     Row(

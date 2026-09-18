@@ -17,6 +17,7 @@ import com.lbc.breadcrumb.net.SearchHit
 import com.lbc.breadcrumb.net.SearchOutcome
 import com.lbc.breadcrumb.sync.UploadWorker
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -112,6 +113,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun close() {
         opened = null
     }
+
+    /** One memory, live -- an open detail shows its summary the moment it is copied back. */
+    fun observe(id: String): Flow<Memory?> = dao.observeById(id)
 
     private suspend fun run(phrase: String) {
         if (phrase.isEmpty()) {
