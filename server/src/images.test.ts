@@ -160,6 +160,7 @@ describe(
         type: "IMAGE",
         hasLink: false,
         capturedAt: new Date("2026-04-18T10:12:33.000Z"),
+        datedAt: new Date("2026-04-18T10:12:33.000Z"),
         updatedAt: new Date("2026-04-18T10:12:33.000Z"),
         sourceAppLabel: "WhatsApp",
         extractedText: null,
@@ -169,7 +170,10 @@ describe(
     before(async () => {
       await connectMongo();
       database = db(`${databaseName()}_test_images`);
-      server = createApp({ log: false, extract: unused, extractImages, embed, database }).listen(0, "127.0.0.1");
+      server = createApp({ log: false, extract: unused, extractImages, embed, parseQuery: unused, database }).listen(
+        0,
+        "127.0.0.1",
+      );
       await once(server, "listening");
       base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     });

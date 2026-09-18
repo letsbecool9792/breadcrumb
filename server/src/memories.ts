@@ -19,6 +19,12 @@ export interface MemoryDoc {
   hasLink: boolean;
   capturedAt: Date;
   contentCreatedAt?: Date | null;
+  /**
+   * The date a person places it by: when a picture was taken, else when it was
+   * saved. What "from April" filters on (step 4.3) -- a screenshot imported in
+   * September was still taken in April. Derived here, never sent by the phone.
+   */
+  datedAt: Date;
   sourceApp?: string | null;
   sourceAppLabel?: string | null;
   title?: string | null;
@@ -73,11 +79,30 @@ export function memories(database: Db): Collection<MemoryDoc> {
 }
 
 /**
- * capturedAt only. Type and date filtering at 4.3 runs inside Atlas Search's
- * own index, so a b-tree index for it would sit unused.
+ * capturedAt, and datedAt for listing a filter's matches newest first when a
+ * search is all filter ("screenshots from April"). Filtering within a search
+ * runs inside the search indexes themselves.
  */
 export async function ensureIndexes(database: Db): Promise<void> {
   await memories(database).createIndex({ capturedAt: -1 }, { name: "capturedAt_desc" });
+  await memories(database).createIndex({ datedAt: -1 }, { name: "datedAt_desc" });
+}
+
+/** When a memory is dated: when its picture was taken, else when it was saved. */
+export function datedAt(memory: { capturedAt: Date; contentCreatedAt?: Date | null }): Date {
+  return memory.contentCreatedAt ?? memory.capturedAt;
+}
+
+/**
+ * Gives documents stored before datedAt existed their date. Idempotent and
+ * cheap, so it runs at every startup; once every document has one it matches
+ * nothing.
+ */
+export async function backfillDatedAt(database: Db): Promise<number> {
+  const result = await memories(database).updateMany({ datedAt: { $exists: false } }, [
+    { $set: { datedAt: { $ifNull: ["$contentCreatedAt", "$capturedAt"] } } },
+  ]);
+  return result.modifiedCount;
 }
 
 /**
@@ -113,6 +138,10 @@ export function vectorIndexDefinition(dimensions: number) {
       { type: "filter", path: "hasLink" },
       { type: "filter", path: "capturedAt" },
       { type: "filter", path: "sourceAppLabel" },
+      // 4.3's date filter
+      { type: "filter", path: "datedAt" },
+      // narrowing to given memories; the search tests use it to see only their own
+      { type: "filter", path: "_id" },
     ],
   };
 }
@@ -166,19 +195,51 @@ export function textIndexDefinition() {
         hasLink: { type: "boolean" },
         capturedAt: { type: "date" },
         sourceAppLabel: { type: "token" },
+        datedAt: { type: "date" },
+        _id: { type: "token" },
       },
     },
   };
 }
 
-/** "full": the cluster already holds as many search indexes as its tier allows. */
-export type SearchIndexState = "created" | "exists" | "refused" | "full";
+/**
+ * Every field path a search index definition declares, of either kind: the
+ * vector index's `fields` list, or the text index's nested mappings.
+ */
+export function declaredPaths(definition: unknown): string[] {
+  const value = definition as {
+    fields?: { path?: string }[];
+    mappings?: { fields?: Record<string, unknown> };
+  };
+  if (Array.isArray(value?.fields)) {
+    return value.fields.flatMap((field) => (typeof field.path === "string" ? [field.path] : []));
+  }
+  const walk = (fields: Record<string, unknown> | undefined, prefix: string): string[] =>
+    Object.entries(fields ?? {}).flatMap(([name, field]) => {
+      const nested = (field as { type?: string; fields?: Record<string, unknown> }) ?? {};
+      return nested.type === "document" && nested.fields
+        ? walk(nested.fields, `${prefix}${name}.`)
+        : [`${prefix}${name}`];
+    });
+  return walk(value?.mappings?.fields, "");
+}
 
 /**
- * Creates a search index if the collection does not have one by that name.
- * An existing index is left alone, even if its definition has since changed
- * here: a changed definition is updated deliberately, in the Atlas UI or with
- * updateSearchIndex, since every update rebuilds the index.
+ * "updated": it existed without a field declared here, and is rebuilding with it.
+ * "full": the cluster already holds as many search indexes as its tier allows.
+ */
+export type SearchIndexState = "created" | "exists" | "updated" | "refused" | "full";
+
+/**
+ * Creates a search index if the collection does not have one by that name,
+ * and updates one that lacks a field its definition now declares -- the
+ * common change, as when 4.3 added `datedAt`.
+ *
+ * Only a missing field triggers an update, never any other difference: Atlas
+ * reports definitions back with its own defaults filled in, so comparing them
+ * whole would rebuild the index at every start. A changed analyzer or type is
+ * applied deliberately, in the Atlas UI or with updateSearchIndex. While an
+ * update builds, the old version keeps answering.
  *
  * Returns "refused" rather than throwing when the database user may not manage
  * search indexes: readWriteAnyDatabase is enough for everything else this
@@ -193,8 +254,14 @@ export async function ensureSearchIndex(
 ): Promise<SearchIndexState> {
   const collection = memories(database);
   try {
-    const existing = await collection.listSearchIndexes().toArray();
-    if (existing.some((index) => index.name === name)) return "exists";
+    const indexes = (await collection.listSearchIndexes().toArray()) as { name: string; latestDefinition?: unknown }[];
+    const existing = indexes.find((index) => index.name === name);
+    if (existing) {
+      const has = new Set(declaredPaths(existing.latestDefinition));
+      if (declaredPaths(definition).every((path) => has.has(path))) return "exists";
+      await collection.updateSearchIndex(name, definition);
+      return "updated";
+    }
 
     await collection.createSearchIndex({ name, type, definition });
     return "created";

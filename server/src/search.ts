@@ -2,6 +2,7 @@ import type { Db } from "mongodb";
 import type { Embedder } from "./embeddings.ts";
 import { isTransient } from "./gemini.ts";
 import { type MemoryDoc, type MemoryType, memories, TEXT_INDEX, TEXT_PATHS, VECTOR_INDEX } from "./memories.ts";
+import { dayAfter, hasFilters, type Interpretation, localDay, type Understand } from "./query.ts";
 
 /** A phrase someone remembers, not a document. Past this it is not a search. */
 export const MAX_QUERY_CHARS = 500;
@@ -10,12 +11,18 @@ export const DEFAULT_LIMIT = 20;
 export const MAX_LIMIT = 50;
 
 /**
- * Narrows both halves of the search before either ranks. 4.3 fills this in
- * from the parsed query; until then only the tests use it, to keep their
- * search to their own marked documents.
+ * Narrows both halves of the search before either ranks. The parsed query
+ * fills it in (4.3); `ids` is how the tests keep to their own documents.
+ * Every condition given must hold.
  */
 export interface SearchFilter {
+  /** Any of these. LINK also matches any memory carrying a link -- a captioned photo, a PDF. */
+  types?: MemoryType[];
+  /** On datedAt: from inclusive, to exclusive. */
+  from?: Date;
+  to?: Date;
   sourceAppLabel?: string;
+  ids?: string[];
 }
 
 export interface SearchRequest {
@@ -67,13 +74,16 @@ export interface SearchHit {
   /**
    * The fused score: 1 / (60 + rank) summed over the halves it placed in. It
    * says only which result is ahead -- about 0.016 is first place in one half,
-   * about 0.033 first in both -- and means nothing across searches.
+   * about 0.033 first in both -- and means nothing across searches. Null when
+   * the search was all filter, and results are simply newest first.
    */
-  score: number;
+  score: number | null;
   ranks: Ranks;
   type: MemoryType;
   hasLink: boolean;
   capturedAt: Date;
+  /** When a picture was taken, else when it was saved: what a date filter matches. */
+  datedAt: Date;
   sourceAppLabel: string | null;
   title: string | null;
   /** What was shared: the link, the text, a photo's caption. */
@@ -160,42 +170,85 @@ export function searchPipeline(query: string, queryVector: number[], limit: numb
       },
     },
     { $limit: limit },
-    {
-      $project: {
-        type: 1,
-        hasLink: 1,
-        capturedAt: 1,
-        sourceAppLabel: 1,
-        title: 1,
-        rawText: 1,
-        extractedText: 1,
-        "enrichment.readText": 1,
-        "enrichment.summary": 1,
-        "enrichment.kind": 1,
-        score: { $meta: "score" },
-        scoreDetails: { $meta: "scoreDetails" },
-      },
-    },
+    { $project: { ...RESULT_FIELDS, score: { $meta: "score" }, scoreDetails: { $meta: "scoreDetails" } } },
   ];
 }
 
-/** The same filter, in each half's own language: MQL for vectors, operators for text. */
+/** What leaves the server about a memory. An allow-list: see [searchPipeline]. */
+const RESULT_FIELDS = {
+  type: 1,
+  hasLink: 1,
+  capturedAt: 1,
+  datedAt: 1,
+  sourceAppLabel: 1,
+  title: 1,
+  rawText: 1,
+  extractedText: 1,
+  "enrichment.readText": 1,
+  "enrichment.summary": 1,
+  "enrichment.kind": 1,
+} as const;
+
+/**
+ * The filter in MQL, for `$vectorSearch` and for a plain listing. A link
+ * filter matches `type = LINK OR hasLink`: filtering on type alone would miss
+ * every captioned photo and PDF that carries one.
+ */
+export function mqlFilter(filter: SearchFilter): Record<string, unknown> {
+  const clauses: Record<string, unknown>[] = [];
+  if (filter.types?.length) {
+    const byType = { type: { $in: filter.types } };
+    clauses.push(filter.types.includes("LINK") ? { $or: [byType, { hasLink: true }] } : byType);
+  }
+  if (filter.from || filter.to) {
+    clauses.push({ datedAt: { ...(filter.from ? { $gte: filter.from } : {}), ...(filter.to ? { $lt: filter.to } : {}) } });
+  }
+  if (filter.sourceAppLabel !== undefined) clauses.push({ sourceAppLabel: { $eq: filter.sourceAppLabel } });
+  if (filter.ids) clauses.push({ _id: { $in: filter.ids } });
+
+  if (clauses.length === 0) return {};
+  return clauses.length === 1 ? (clauses[0] as Record<string, unknown>) : { $and: clauses };
+}
+
+/** The same filter in Atlas Search operators, for the text half. */
+export function searchFilterClauses(filter: SearchFilter): object[] {
+  const clauses: object[] = [];
+  if (filter.types?.length) {
+    const byType = { in: { path: "type", value: filter.types } };
+    clauses.push(
+      filter.types.includes("LINK")
+        ? { compound: { should: [byType, { equals: { path: "hasLink", value: true } }], minimumShouldMatch: 1 } }
+        : byType,
+    );
+  }
+  if (filter.from || filter.to) {
+    clauses.push({
+      range: { path: "datedAt", ...(filter.from ? { gte: filter.from } : {}), ...(filter.to ? { lt: filter.to } : {}) },
+    });
+  }
+  if (filter.sourceAppLabel !== undefined) {
+    clauses.push({ equals: { path: "sourceAppLabel", value: filter.sourceAppLabel } });
+  }
+  if (filter.ids) clauses.push({ in: { path: "_id", value: filter.ids } });
+  return clauses;
+}
+
 function vectorFilter(filter: SearchFilter) {
-  return filter.sourceAppLabel === undefined ? {} : { filter: { sourceAppLabel: { $eq: filter.sourceAppLabel } } };
+  const mql = mqlFilter(filter);
+  return Object.keys(mql).length === 0 ? {} : { filter: mql };
 }
 
 function textFilter(filter: SearchFilter) {
-  return filter.sourceAppLabel === undefined
-    ? {}
-    : { filter: [{ equals: { path: "sourceAppLabel", value: filter.sourceAppLabel } }] };
+  const clauses = searchFilterClauses(filter);
+  return clauses.length === 0 ? {} : { filter: clauses };
 }
 
 type Projected = Pick<
   MemoryDoc,
-  "_id" | "type" | "hasLink" | "capturedAt" | "sourceAppLabel" | "title" | "rawText" | "extractedText"
+  "_id" | "type" | "hasLink" | "capturedAt" | "datedAt" | "sourceAppLabel" | "title" | "rawText" | "extractedText"
 > & {
   enrichment?: { summary?: string; kind?: string; readText?: string };
-  score: number;
+  score?: number;
   scoreDetails?: { details?: { inputPipelineName?: string; rank?: number }[] };
 };
 
@@ -242,22 +295,96 @@ export async function searchMemories(database: Db, embed: Embedder, request: Sea
     .aggregate<Projected>(searchPipeline(request.query, queryVector, request.limit, request.filter))
     .toArray();
 
+  return { ok: true, results: found.map(toHit) };
+}
+
+/**
+ * A search that was all filter -- "screenshots from April" -- has nothing to
+ * rank by, so its matches come back newest first. No model call at all.
+ */
+export async function listMemories(database: Db, filter: SearchFilter, limit: number): Promise<SearchHit[]> {
+  const found = await memories(database)
+    .find(mqlFilter(filter), { projection: RESULT_FIELDS })
+    .sort({ datedAt: -1 })
+    .limit(limit)
+    .toArray();
+  return (found as Projected[]).map(toHit);
+}
+
+function toHit(doc: Projected): SearchHit {
   return {
-    ok: true,
-    results: found.map((doc) => ({
-      id: doc._id,
-      score: doc.score,
-      ranks: ranksFrom(doc.scoreDetails),
-      type: doc.type,
-      hasLink: doc.hasLink,
-      capturedAt: doc.capturedAt,
-      sourceAppLabel: doc.sourceAppLabel ?? null,
-      title: doc.title ?? null,
-      rawText: doc.rawText ?? null,
-      extractedText: doc.extractedText ?? null,
-      readText: doc.enrichment?.readText || null,
-      summary: doc.enrichment?.summary || null,
-      kind: doc.enrichment?.kind || null,
-    })),
+    id: doc._id,
+    score: doc.score ?? null,
+    ranks: ranksFrom(doc.scoreDetails),
+    type: doc.type,
+    hasLink: doc.hasLink,
+    capturedAt: doc.capturedAt,
+    datedAt: doc.datedAt,
+    sourceAppLabel: doc.sourceAppLabel ?? null,
+    title: doc.title ?? null,
+    rawText: doc.rawText ?? null,
+    extractedText: doc.extractedText ?? null,
+    readText: doc.enrichment?.readText || null,
+    summary: doc.enrichment?.summary || null,
+    kind: doc.enrichment?.kind || null,
   };
+}
+
+/** Turns what the parser read into the filter both halves run under. */
+export function filterFor(interpretation: Interpretation): SearchFilter {
+  return {
+    ...(interpretation.types.length ? { types: interpretation.types } : {}),
+    ...(interpretation.from ? { from: localDay(interpretation.from) } : {}),
+    ...(interpretation.to ? { to: dayAfter(interpretation.to) } : {}),
+    ...(interpretation.sourceApp ? { sourceAppLabel: interpretation.sourceApp } : {}),
+  };
+}
+
+export interface SearchAnswer {
+  /** The phrase as typed. */
+  query: string;
+  /** How it was taken apart, so a searcher can see why the list is what it is. */
+  interpretation: Interpretation | null;
+  /** Why it could not be taken apart; the search then ran on the raw phrase, unfiltered. */
+  interpretationError?: string;
+  results: SearchHit[];
+}
+
+export type AnswerOutcome = { ok: true; answer: SearchAnswer } | { ok: false; reason: string; retryable: boolean };
+
+/**
+ * The whole of a search (rule 6): take the phrase apart, then search what is
+ * left of it under the filters it asked for.
+ *
+ * A parse that fails never fails the search. It costs the filters, and the
+ * raw phrase is searched as it was typed -- worse, but still a search.
+ *
+ * `request.filter` is laid over whatever the phrase asked for; the tests use
+ * it to keep to their own documents.
+ */
+export async function answerSearch(
+  database: Db,
+  embed: Embedder,
+  understand: Understand,
+  request: SearchRequest,
+): Promise<AnswerOutcome> {
+  const { interpretation, error } = await understand(database, request.query);
+  const filter: SearchFilter = { ...(interpretation ? filterFor(interpretation) : {}), ...request.filter };
+
+  // Words the parser left, or the phrase itself when it took everything and
+  // filtered nothing ("stuff") -- an empty search is never what was meant.
+  const words = interpretation && (interpretation.query || hasFilters(interpretation)) ? interpretation.query : request.query;
+
+  const base = {
+    query: request.query,
+    interpretation,
+    ...(error === undefined ? {} : { interpretationError: error }),
+  };
+
+  if (!words) {
+    return { ok: true, answer: { ...base, results: await listMemories(database, filter, request.limit) } };
+  }
+
+  const outcome = await searchMemories(database, embed, { query: words, limit: request.limit, filter });
+  return outcome.ok ? { ok: true, answer: { ...base, results: outcome.results } } : outcome;
 }

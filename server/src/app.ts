@@ -5,7 +5,8 @@ import type { Embedder } from "./embeddings.ts";
 import type { Extractor, ImageExtractor } from "./gemini.ts";
 import { ingestImages, parseImages } from "./images.ts";
 import { type IncomingMemory, ingest, parseMemory } from "./ingest.ts";
-import { parseSearch, searchMemories } from "./search.ts";
+import { type QueryParser, understanding } from "./query.ts";
+import { answerSearch, parseSearch } from "./search.ts";
 
 /** One request's worth of memories. The phone sends ten; this is the ceiling. */
 const MAX_BATCH = 50;
@@ -22,6 +23,8 @@ export interface AppOptions {
   embed: Embedder;
   /** The Gemini pass over saved pictures (step 3.6). */
   extractImages: ImageExtractor;
+  /** Takes a search phrase apart into words and filters (step 4.3). */
+  parseQuery: QueryParser;
   /** Defaults to the process-wide connection; tests pass their own database. */
   database?: Db;
 }
@@ -30,9 +33,11 @@ export interface AppOptions {
  * The HTTP surface, built without listening so tests can serve it on any
  * port. Stays thin: health, ingest and search.
  */
-export function createApp({ log = true, extract, embed, extractImages, database }: AppOptions) {
+export function createApp({ log = true, extract, embed, extractImages, parseQuery, database }: AppOptions) {
   const app = express();
   app.disable("x-powered-by");
+  // one per app, so what it remembers lives as long as the server does
+  const understand = understanding(parseQuery);
 
   if (log) app.use(logRequest);
 
@@ -107,7 +112,7 @@ export function createApp({ log = true, extract, embed, extractImages, database 
       return;
     }
 
-    const outcome = await searchMemories(database ?? db(), embed, parsed.request);
+    const outcome = await answerSearch(database ?? db(), embed, understand, parsed.request);
     if (!outcome.ok) {
       // 503 when asking again shortly may work; 502 when the model refused
       // outright. Either way the embedding model failed, not this server.
@@ -118,7 +123,7 @@ export function createApp({ log = true, extract, embed, extractImages, database 
       });
       return;
     }
-    res.json({ query: parsed.request.query, results: outcome.results });
+    res.json(outcome.answer);
   });
 
   // JSON, never Express's HTML pages: the only client parses JSON.

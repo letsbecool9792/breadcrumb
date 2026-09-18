@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Db } from "mongodb";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, type Embedder, embeddingText } from "./embeddings.ts";
 import { type Extractor, isTransient } from "./gemini.ts";
-import { type MemoryDoc, type MemoryType, memories, putMemories } from "./memories.ts";
+import { datedAt, type MemoryDoc, type MemoryType, memories, putMemories } from "./memories.ts";
 
 const TYPES: MemoryType[] = ["TEXT", "LINK", "IMAGE", "PDF", "AUDIO"];
 
@@ -179,6 +179,7 @@ export async function ingest(
       hasLink: memory.hasLink,
       capturedAt: memory.capturedAt,
       contentCreatedAt: memory.contentCreatedAt,
+      datedAt: datedAt(memory),
       sourceApp: memory.sourceApp,
       sourceAppLabel: memory.sourceAppLabel,
       title: memory.title,

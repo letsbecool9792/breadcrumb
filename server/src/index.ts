@@ -2,7 +2,9 @@ import { createApp } from "./app.ts";
 import { connectMongo, databaseName, db, describeMongoError } from "./db.ts";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, geminiEmbedder } from "./embeddings.ts";
 import { geminiExtractor, geminiImageExtractor, INGEST_MODEL } from "./gemini.ts";
+import { geminiQueryParser, QUERY_MODEL } from "./query.ts";
 import {
+  backfillDatedAt,
   ensureIndexes,
   ensureTextIndex,
   ensureVectorIndex,
@@ -32,6 +34,8 @@ try {
   await connectMongo();
   await ensureIndexes(db());
   console.log(`mongodb connected, database "${databaseName()}"`);
+  const dated = await backfillDatedAt(db());
+  if (dated > 0) console.log(`dated ${dated} memories stored before datedAt existed`);
 
   // both halves of hybrid search (rule 5)
   const vector = await ensureVectorIndex(db(), EMBEDDING_DIMENSIONS);
@@ -42,12 +46,16 @@ try {
   process.exit(1);
 }
 
-console.log(`gemini models: ${INGEST_MODEL} for ingest, ${EMBEDDING_MODEL} at ${EMBEDDING_DIMENSIONS} dims`);
+console.log(
+  `gemini models: ${INGEST_MODEL} for ingest, ${QUERY_MODEL} for search, ` +
+    `${EMBEDDING_MODEL} at ${EMBEDDING_DIMENSIONS} dims`,
+);
 
 createApp({
   extract: geminiExtractor(geminiKey),
   extractImages: geminiImageExtractor(geminiKey),
   embed: geminiEmbedder(geminiKey),
+  parseQuery: geminiQueryParser(geminiKey),
 }).listen(port, host, (error) => {
   if (error) {
     console.error(
@@ -69,6 +77,8 @@ function reportIndex(name: string, definition: object, state: SearchIndexState) 
     console.log(`search index "${name}" exists`);
   } else if (state === "created") {
     console.log(`search index "${name}" created, searchable in about 30s`);
+  } else if (state === "updated") {
+    console.log(`search index "${name}" lacked a field and is rebuilding; new fields searchable in about 30s`);
   } else {
     console.warn(
       (state === "full"

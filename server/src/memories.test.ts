@@ -3,11 +3,15 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import type { Db } from "mongodb";
 import { closeMongo, connectMongo, databaseName, db } from "./db.ts";
 import {
+  backfillDatedAt,
+  datedAt,
+  declaredPaths,
   ensureIndexes,
   getMemory,
   memories,
   putMemory,
   recentMemories,
+  textIndexDefinition,
   vectorIndexDefinition,
 } from "./memories.ts";
 
@@ -28,14 +32,63 @@ describe("vectorIndexDefinition", () => {
     assert.deepEqual(field, { type: "vector", path: "embedding", numDimensions: 768, similarity: "cosine" });
   });
 
-  test("declares every field 4.3 filters on", () => {
+  test("declares every field a search filters on", () => {
     // a field not declared here cannot be a pre-filter, and adding one later
     // means rebuilding the index
     const filters = vectorIndexDefinition(768)
       .fields.filter((field) => field.type === "filter")
       .map((field) => field.path);
 
-    assert.deepEqual(filters, ["type", "hasLink", "capturedAt", "sourceAppLabel"]);
+    assert.deepEqual(filters, ["type", "hasLink", "capturedAt", "sourceAppLabel", "datedAt", "_id"]);
+  });
+
+  test("the text index can filter on the same fields, so both halves narrow alike", () => {
+    const vectorFilters = vectorIndexDefinition(768)
+      .fields.filter((field) => field.type === "filter")
+      .map((field) => field.path);
+
+    const textPaths = declaredPaths(textIndexDefinition());
+    for (const path of vectorFilters) assert.ok(textPaths.includes(path), `${path} is missing from the text index`);
+  });
+});
+
+describe("declaredPaths", () => {
+  test("reads a vector index's fields", () => {
+    assert.deepEqual(declaredPaths({ fields: [{ type: "vector", path: "embedding" }, { type: "filter", path: "type" }] }), [
+      "embedding",
+      "type",
+    ]);
+  });
+
+  test("reads a text index's mappings, nested documents included", () => {
+    const paths = declaredPaths({
+      mappings: { fields: { title: { type: "string" }, enrichment: { type: "document", fields: { kind: { type: "string" } } } } },
+    });
+
+    assert.deepEqual(paths, ["title", "enrichment.kind"]);
+  });
+
+  test("an index definition Atlas reports with its own defaults still reads the same", () => {
+    // what listSearchIndexes hands back: the same fields, plus settings we never set
+    const reported = { ...textIndexDefinition(), storedSource: false, numPartitions: 1 };
+
+    assert.deepEqual(declaredPaths(reported), declaredPaths(textIndexDefinition()));
+  });
+
+  test("nothing declared reads as nothing, not as an error", () => {
+    assert.deepEqual(declaredPaths(undefined), []);
+    assert.deepEqual(declaredPaths({}), []);
+  });
+});
+
+describe("datedAt", () => {
+  test("a picture is dated by when it was taken, anything else by when it was saved", () => {
+    const capturedAt = new Date("2026-09-10T10:00:00.000Z");
+    const taken = new Date("2026-04-02T09:00:00.000Z");
+
+    assert.equal(datedAt({ capturedAt, contentCreatedAt: taken }), taken);
+    assert.equal(datedAt({ capturedAt, contentCreatedAt: null }), capturedAt);
+    assert.equal(datedAt({ capturedAt }), capturedAt);
   });
 });
 
@@ -51,6 +104,7 @@ describe(
       hasLink: true,
       capturedAt: new Date("2026-04-18T10:12:33.000Z"),
       contentCreatedAt: new Date("2026-04-17T08:00:00.000Z"),
+      datedAt: new Date("2026-04-17T08:00:00.000Z"),
       sourceApp: "com.whatsapp",
       sourceAppLabel: "WhatsApp",
       title: "Internship posting",
@@ -105,6 +159,19 @@ describe(
 
     test("an id we do not hold reads back as null", async () => {
       assert.equal(await getMemory(database, "no-such-id"), null);
+    });
+
+    test("memories stored before datedAt existed are given one, once", async () => {
+      const { datedAt: _, ...withoutDate } = sample;
+      await memories(database).insertMany([
+        { ...withoutDate, _id: "photo" },
+        { ...withoutDate, _id: "note", contentCreatedAt: null },
+      ] as never[]);
+
+      assert.equal(await backfillDatedAt(database), 2);
+      assert.deepEqual((await getMemory(database, "photo"))?.datedAt, sample.contentCreatedAt);
+      assert.deepEqual((await getMemory(database, "note"))?.datedAt, sample.capturedAt);
+      assert.equal(await backfillDatedAt(database), 0, "a second run has nothing left to do");
     });
 
     test("recent memories come back newest first", async () => {

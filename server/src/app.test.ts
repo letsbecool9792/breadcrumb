@@ -13,7 +13,10 @@ before(async () => {
   const unused = async () => {
     throw new Error("not used by these tests");
   };
-  server = createApp({ log: false, extract: unused, embed: unused, extractImages: unused }).listen(0, "127.0.0.1");
+  server = createApp({ log: false, extract: unused, embed: unused, extractImages: unused, parseQuery: unused }).listen(
+    0,
+    "127.0.0.1",
+  );
   await once(server, "listening");
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });

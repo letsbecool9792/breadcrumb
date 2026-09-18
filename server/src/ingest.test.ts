@@ -100,9 +100,9 @@ describe(
       return texts.map(() => embedding as number[]);
     };
 
-    /** These tests never post a picture; images have their own suite. */
+    /** These tests never post a picture or search; both have their own suites. */
     const noImages = async () => {
-      throw new Error("the image extractor is not used by these tests");
+      throw new Error("not used by these tests");
     };
 
     const post = (body: unknown) =>
@@ -118,7 +118,10 @@ describe(
       // means each suite's cleanup wipes the other's documents mid-test
       database = db(`${databaseName()}_test_ingest`);
       await ensureIndexes(database);
-      server = createApp({ log: false, extract, embed, extractImages: noImages, database }).listen(0, "127.0.0.1");
+      server = createApp({ log: false, extract, embed, extractImages: noImages, parseQuery: noImages, database }).listen(
+        0,
+        "127.0.0.1",
+      );
       await once(server, "listening");
       base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     });
@@ -164,6 +167,18 @@ describe(
       assert.deepEqual(stored?.enrichment?.entities, ["Qualcomm"]);
       assert.deepEqual(stored?.enrichment?.dates, ["2026-04-30"]);
       assert.ok(stored?.enrichment?.at instanceof Date);
+    });
+
+    test("a picture is dated by when it was taken, anything else by when it was saved", async () => {
+      const taken = Date.UTC(2026, 3, 2, 9, 0, 0);
+      await post([
+        { ...sent, id: "link" },
+        { ...sent, id: "photo", type: "IMAGE", hasLink: false, contentCreatedAt: taken },
+      ]);
+
+      // what "from April" filters on (4.3): a photo saved in September was still taken in April
+      assert.deepEqual((await getMemory(database, "link"))?.datedAt, new Date(sent.capturedAt));
+      assert.deepEqual((await getMemory(database, "photo"))?.datedAt, new Date(taken));
     });
 
     test("the original never leaves the phone", async () => {
@@ -345,7 +360,7 @@ describe(
         const first = inputs[0];
         return first ? new Map([[first.index, extraction as Extraction]]) : new Map();
       };
-      const app = createApp({ log: false, extract: partial, embed, extractImages: noImages, database });
+      const app = createApp({ log: false, extract: partial, embed, extractImages: noImages, parseQuery: noImages, database });
       const server2 = app.listen(0, "127.0.0.1");
       await once(server2, "listening");
       const base2 = `http://127.0.0.1:${(server2.address() as AddressInfo).port}`;
