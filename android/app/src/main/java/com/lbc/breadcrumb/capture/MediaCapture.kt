@@ -27,6 +27,10 @@ class MediaCapture(
     private val store: OriginalStore,
 ) {
 
+    /**
+     * @param note the person's own words, given to every file saved -- from
+     *   the app's own sheet, where they wrote one line for what they picked.
+     */
     suspend fun save(
         uris: List<Uri>,
         intentType: String?,
@@ -34,6 +38,7 @@ class MediaCapture(
         subject: String?,
         source: Provenance?,
         now: Long = System.currentTimeMillis(),
+        note: String? = null,
     ): CaptureResult {
         val accepted = uris.filter { MediaShareParser.isAcceptableScheme(it.scheme) }
         val saved = mutableListOf<Memory>()
@@ -61,7 +66,7 @@ class MediaCapture(
                 sourceApp = source?.packageName,
                 sourceAppLabel = source?.label,
                 now = now,
-            )
+            ).copy(note = note)
 
             try {
                 dao.upsert(memory)

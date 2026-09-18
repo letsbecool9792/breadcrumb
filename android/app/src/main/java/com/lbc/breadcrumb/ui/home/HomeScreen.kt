@@ -18,8 +18,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -139,6 +141,23 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
                         onNote = { note -> viewModel.setNote(opened.memory.id, note) },
                     )
                 }
+
+                // the "+": keeping something from inside the app
+                SheetLayer(item = if (viewModel.writing) Unit else null, onDismiss = viewModel::stopWriting) { _, _ ->
+                    Composer(
+                        draft = viewModel.draft,
+                        onDraftChange = viewModel::onDraftChange,
+                        attachments = viewModel.attachments,
+                        onAttach = viewModel::attach,
+                        onDetach = viewModel::detach,
+                        keeping = viewModel.keeping,
+                        failed = viewModel.keepFailed,
+                        onKeep = {
+                            keyboard?.hide()
+                            viewModel.keep()
+                        },
+                    )
+                }
             }
         }
     }
@@ -214,12 +233,26 @@ private fun Screen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             UndoBar(removed = viewModel.removed, onUndo = viewModel::undo)
-            SearchField(
-                query = viewModel.query,
-                searching = (search as? SearchState.Searching)?.status == SearchStatus.RANKING,
-                onQueryChange = viewModel::onQueryChange,
-                onClear = viewModel::clear,
-            )
+            val searchInteraction = remember { MutableInteractionSource() }
+            val searchFocused by searchInteraction.collectIsFocusedAsState()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SearchField(
+                    query = viewModel.query,
+                    searching = (search as? SearchState.Searching)?.status == SearchStatus.RANKING,
+                    onQueryChange = viewModel::onQueryChange,
+                    onClear = viewModel::clear,
+                    interaction = searchInteraction,
+                    modifier = Modifier.weight(1f),
+                )
+                // out of the way while searching: the field takes the whole width
+                AnimatedVisibility(
+                    visible = !searchFocused && viewModel.query.isEmpty(),
+                    enter = fadeIn(tween(180)) + expandHorizontally(tween(220)),
+                    exit = fadeOut(tween(120)) + shrinkHorizontally(tween(200)),
+                ) {
+                    KeepSomethingButton(onClick = viewModel::startWriting, modifier = Modifier.padding(start = 10.dp))
+                }
+            }
         }
     }
 }
@@ -303,10 +336,11 @@ private fun SearchField(
     searching: Boolean,
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit,
+    /** Held by the screen, which hides the "+" while the field has focus. */
+    interaction: MutableInteractionSource,
     modifier: Modifier = Modifier,
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
-    val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val shape = RoundedCornerShape(27.dp)
 

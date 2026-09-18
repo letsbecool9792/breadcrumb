@@ -49,6 +49,17 @@
     <string name="detail_note">your note</string>
     <string name="detail_note_edit">edit</string>
     <string name="detail_note_done">Done</string>
+    <!-- The app's own sheet for keeping something (the "+"). -->
+    <string name="compose_open">Keep something</string>
+    <string name="compose_title">Keep something</string>
+    <string name="compose_hint">a thought, a link, anything…</string>
+    <string name="compose_hint_note">a note about it — who sent it, what it\'s for…</string>
+    <string name="compose_photo">photo</string>
+    <string name="compose_pdf">pdf</string>
+    <string name="compose_keep">Keep</string>
+    <string name="compose_remove">Remove</string>
+    <string name="compose_failed">couldn\'t keep that — try again?</string>
+
     <string name="undo_deleted">deleted</string>
     <string name="undo_action">Undo</string>
 </resources>
