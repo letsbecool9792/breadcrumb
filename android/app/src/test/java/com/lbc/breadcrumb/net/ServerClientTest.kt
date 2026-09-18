@@ -145,6 +145,7 @@ class ServerClientTest {
                 sourceAppLabel = "WhatsApp",
                 rawText = "have a look https://example.com",
                 extractedText = "Qualcomm SWE Internship",
+                note = "Priya says apply before May",
                 title = "Internship posting",
                 localUri = "file:///data/originals/m1.jpg",
                 syncState = SyncState.PENDING,
@@ -158,7 +159,7 @@ class ServerClientTest {
         // the original stays on the phone (architecture rule 1)
         assertFalse("payload leaked localUri: $body", body.contains("localUri"))
         assertFalse("payload leaked syncState: $body", body.contains("syncState"))
-        for (field in listOf("m1", "IMAGE", "WhatsApp", "Qualcomm SWE Internship", "1700000000000")) {
+        for (field in listOf("m1", "IMAGE", "WhatsApp", "Qualcomm SWE Internship", "1700000000000", "\"note\":\"Priya says apply before May\"")) {
             assertTrue("payload is missing $field: $body", body.contains(field))
         }
     }
