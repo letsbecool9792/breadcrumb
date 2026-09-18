@@ -43,7 +43,7 @@ internal fun Masthead(kept: String, onLongPress: (() -> Unit)?, modifier: Modifi
     ) {
         Text(
             text = stringResource(R.string.home_wordmark),
-            style = serif(58.sp, lineHeight = 58.sp),
+            style = serif(48.sp, lineHeight = 52.sp),
             modifier = if (onLongPress == null) Modifier else Modifier.combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -81,7 +81,7 @@ internal fun CollapsedMasthead(kept: String, shown: Float, modifier: Modifier = 
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(stringResource(R.string.home_wordmark), style = serif(22.sp, lineHeight = 22.sp))
+        Text(stringResource(R.string.home_wordmark), style = serif(20.sp, lineHeight = 22.sp))
         Text(kept, style = monoStyle(11.sp, InkOutline))
     }
 }

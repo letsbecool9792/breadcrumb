@@ -347,7 +347,7 @@ private fun LinkTile(memory: Memory, now: Long) {
         }
         Text(
             text = ResultText.title(memory),
-            style = serif(18.sp, lineHeight = 20.sp),
+            style = sans(14.sp, Bone, FontWeight.Medium, lineHeight = 19.sp),
             maxLines = 4,
             overflow = TextOverflow.Ellipsis,
         )
@@ -356,9 +356,9 @@ private fun LinkTile(memory: Memory, now: Long) {
 }
 
 /**
- * The note is the whole tile, set as a pull-quote: the serif in italic,
- * under an amber opening mark. What someone jotted down reads as something
- * said, not as a form field.
+ * The note is the whole tile, under a small amber opening mark that says
+ * "something jotted down" before it is read. In the sans, as every title on
+ * the page is; opened, it is read in the serif.
  */
 @Composable
 private fun NoteTile(memory: Memory, now: Long) {
@@ -366,10 +366,10 @@ private fun NoteTile(memory: Memory, now: Long) {
         Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 13.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("“", style = serif(40.sp, AmberBright, lineHeight = 30.sp))
+        Text("“", style = sans(34.sp, AmberBright, FontWeight.Medium, lineHeight = 26.sp))
         Text(
             text = memory.rawText?.trim().orEmpty().ifEmpty { ResultText.title(memory) },
-            style = serif(19.sp, lineHeight = 22.sp, italic = true),
+            style = sans(15.sp, lineHeight = 21.sp),
             maxLines = 7,
             overflow = TextOverflow.Ellipsis,
         )
@@ -386,7 +386,7 @@ private fun Caption(title: String?, meta: String) {
         title?.let {
             Text(
                 text = it,
-                style = serif(17.sp, lineHeight = 19.sp),
+                style = sans(14.sp, Bone, FontWeight.Medium, lineHeight = 19.sp),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )

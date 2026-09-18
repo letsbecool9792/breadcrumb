@@ -189,7 +189,7 @@ private fun ResultRow(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(
                 text = title,
-                style = serif(19.sp, lineHeight = 22.sp),
+                style = sans(16.sp, Bone, FontWeight.Medium, lineHeight = 21.sp),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )

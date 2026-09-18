@@ -242,7 +242,7 @@ private fun LinkCard(memory: Memory, onOpen: () -> Unit) {
         }
         Text(
             text = ResultText.title(memory),
-            style = serif(25.sp, lineHeight = 28.sp),
+            style = serif(23.sp, lineHeight = 28.sp),
         )
         memory.rawText?.takeIf { memory.title != null }?.let {
             SelectionContainer {
@@ -259,7 +259,8 @@ private fun Note(memory: Memory) {
         SelectionContainer {
             Text(
                 text = memory.rawText?.trim().orEmpty().ifEmpty { ResultText.title(memory) },
-                style = sans(17.sp, lineHeight = 25.sp),
+                // opened, a note is read in the serif, as every memory's title is
+                style = serif(20.sp, lineHeight = 28.sp),
             )
         }
     }
@@ -282,7 +283,7 @@ private fun Heading(memory: Memory, summary: String?) {
     if (title == null && caption == null && description == null) return
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
         title?.let {
-            Text(it, style = serif(30.sp, lineHeight = 32.sp))
+            Text(it, style = serif(27.sp, lineHeight = 32.sp))
         }
         caption?.let {
             SelectionContainer { Text(it, style = sans(15.sp, lineHeight = 22.sp)) }
