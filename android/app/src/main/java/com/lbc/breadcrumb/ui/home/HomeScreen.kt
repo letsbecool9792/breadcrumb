@@ -3,6 +3,10 @@ package com.lbc.breadcrumb.ui.home
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -91,6 +95,7 @@ import java.time.LocalDate
  * @param onOpenDebug long-pressing the wordmark opens the old debug list,
  *   which keeps the server status and the sync button. Null outside debug builds.
  */
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel()) {
     val memories by viewModel.memories.collectAsStateWithLifecycle()
@@ -102,6 +107,53 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
     // back out of a search before backing out of the app
     BackHandler(enabled = viewModel.query.isNotEmpty()) { viewModel.clear() }
 
+    // the keyboard goes before a memory opens, or the sheet would rise behind it
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    val open: (Result) -> Unit = { result ->
+        keyboard?.hide()
+        focus.clearFocus()
+        viewModel.open(result)
+    }
+
+    // One composition for the screen and the open sheet, so a picture can
+    // travel between its tile and the sheet.
+    SharedTransitionLayout(Modifier.fillMaxSize()) {
+        CompositionLocalProvider(
+            LocalSharedTransition provides this,
+            LocalOpenedId provides viewModel.opened?.memory?.id,
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                Screen(viewModel, memories, unsent, search, now, onOpenDebug, open)
+
+                SheetLayer(item = viewModel.opened, onDismiss = viewModel::close) { opened, visibility ->
+                    // live, so a summary copied back while it is open appears in place
+                    val live by remember(opened.memory.id) { viewModel.observe(opened.memory.id) }
+                        .collectAsStateWithLifecycle(initialValue = opened.memory)
+                    MemoryDetail(
+                        result = opened,
+                        memory = live ?: opened.memory,
+                        now = now,
+                        visibility = visibility,
+                        onDelete = viewModel::delete,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Everything under the sheet: the mosaic or the results, and the search field. */
+@Composable
+private fun Screen(
+    viewModel: HomeViewModel,
+    memories: List<Memory>?,
+    unsent: Int,
+    search: SearchState,
+    now: Long,
+    onOpenDebug: (() -> Unit)?,
+    open: (Result) -> Unit,
+) {
     Column(
         Modifier
             .fillMaxSize()
@@ -128,7 +180,7 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
                         // at rest the mosaic carries its own masthead; a search has its counter
                         Column(Modifier.fillMaxSize()) {
                             Counter(shown, total)
-                            Box(Modifier.weight(1f)) { Results(shown, now, onOpen = viewModel::open) }
+                            Box(Modifier.weight(1f)) { Results(shown, now, onOpen = open) }
                         }
                     }
                 } else {
@@ -139,7 +191,7 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
                         grid = grid,
                         entrances = entrances,
                         onOpenDebug = onOpenDebug,
-                        onOpen = { viewModel.open(Result(it, hit = null)) },
+                        onOpen = { open(Result(it, hit = null)) },
                     )
                 }
             }
@@ -168,19 +220,6 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
                 onClear = viewModel::clear,
             )
         }
-    }
-
-    viewModel.opened?.let { opened ->
-        // live, so a summary copied back while it is open appears in place
-        val live by remember(opened.memory.id) { viewModel.observe(opened.memory.id) }
-            .collectAsStateWithLifecycle(initialValue = opened.memory)
-        MemoryDetail(
-            result = opened,
-            memory = live ?: opened.memory,
-            now = now,
-            onDismiss = viewModel::close,
-            onDelete = viewModel::delete,
-        )
     }
 }
 

@@ -1,5 +1,10 @@
 package com.lbc.breadcrumb.ui.home
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -8,11 +13,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,19 +27,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -51,13 +54,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
 import com.lbc.breadcrumb.R
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.open.OriginalAction
 import com.lbc.breadcrumb.open.Originals
 import com.lbc.breadcrumb.ui.common.DocumentGlyph
+import com.lbc.breadcrumb.ui.common.Thumbnails
 import com.lbc.breadcrumb.ui.common.rememberThumbnail
 import com.lbc.breadcrumb.ui.theme.AmberBright
 import com.lbc.breadcrumb.ui.theme.AmberOnContainer
@@ -77,91 +80,91 @@ import java.time.ZoneId
  * mono, so it recedes. One action, and it leaves the app: Breadcrumb's job
  * ends at handing back the original.
  *
- * A sheet, so a swipe down falls back into the list it came from.
+ * The content of a [SheetLayer], so a swipe down falls back into the list it
+ * came from, and a picture travels in from its tile.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MemoryDetail(
+internal fun ColumnScope.MemoryDetail(
     result: Result,
     /** The row as it is now: its summary may have been copied back since it was opened. */
     memory: Memory,
     now: Long,
-    onDismiss: () -> Unit,
+    /** The sheet's own coming and going, which the picture travels within. */
+    visibility: AnimatedVisibilityScope,
     onDelete: (Memory) -> Unit,
 ) {
     val context = LocalContext.current
     val action = remember(memory) { Originals.actionFor(context, memory) }
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
     // a search's answer is the freshest; the phone's copy covers a memory opened from the mosaic
     val summary = result.hit?.summary ?: memory.summary
     val readText = result.hit?.readText ?: memory.readText
+    val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
 
-    // Never the whole screen: the mosaic or the list it was opened from stays
-    // in sight above it, dimmed, so the sheet reads as a layer over them.
-    val window = LocalWindowInfo.current.containerSize
-    val windowHeight = with(LocalDensity.current) { window.height.toDp() }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheet,
-        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
-        containerColor = Ink,
-        contentColor = Bone,
-        scrimColor = Color.Black.copy(alpha = 0.6f),
-        dragHandle = { Grabber() },
+    Grabber(Modifier.align(Alignment.CenterHorizontally))
+    Column(
+        Modifier
+            .weight(1f, fill = false)
+            .verticalScroll(rememberScrollState()),
     ) {
-        Column(Modifier.heightIn(max = windowHeight * 0.84f)) {
-            Column(
-                Modifier
-                    .weight(1f, fill = false)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                Artifact(memory, maxPicture = windowHeight * 0.42f, onOpen = { Originals.perform(context, action) })
-                Column(
-                    Modifier.padding(start = 22.dp, end = 22.dp, top = 22.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                ) {
-                    Heading(memory, summary)
-                    Provenance(memory, now)
-                    FoundText(memory, readText)
-                }
-            }
-            Actions(
-                action = action,
-                onOpen = { Originals.perform(context, action) },
-                // the sheet leaves first, then the memory
-                onDelete = { scope.launch { sheet.hide() }.invokeOnCompletion { onDelete(memory) } },
-            )
+        // A tall screenshot is cropped at 42% of the window, so what the sheet
+        // says about it is in view without scrolling.
+        Artifact(memory, maxPicture = windowHeight * 0.42f, visibility, onOpen = { Originals.perform(context, action) })
+        Column(
+            with(visibility) {
+                // the words follow the picture in, a beat behind
+                Modifier.animateEnterExit(
+                    enter = fadeIn(tween(320, delayMillis = 140)) + slideInVertically(tween(420, delayMillis = 100)) { it / 6 },
+                    exit = fadeOut(tween(120)),
+                )
+            }.padding(start = 22.dp, end = 22.dp, top = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Heading(memory, summary)
+            Provenance(memory, now)
+            FoundText(memory, readText)
         }
     }
+    Actions(
+        action = action,
+        onOpen = { Originals.perform(context, action) },
+        onDelete = { onDelete(memory) },
+        modifier = Modifier.navigationBarsPadding(),
+    )
 }
 
 @Composable
-private fun Grabber() {
-    Box(Modifier.padding(top = 12.dp, bottom = 10.dp).size(width = 34.dp, height = 4.dp).clip(CircleShape).background(InkGrabber))
+private fun Grabber(modifier: Modifier) {
+    Box(modifier.padding(top = 12.dp, bottom = 10.dp).size(width = 34.dp, height = 4.dp).clip(CircleShape).background(InkGrabber))
 }
 
 // --- the artifact ------------------------------------------------------------
 
 @Composable
-private fun Artifact(memory: Memory, maxPicture: Dp, onOpen: () -> Unit) {
+private fun Artifact(memory: Memory, maxPicture: Dp, visibility: AnimatedVisibilityScope, onOpen: () -> Unit) {
     when (memory.type) {
-        MemoryType.IMAGE -> Picture(memory, maxPicture, onOpen)
-        MemoryType.PDF -> Page(memory, onOpen)
+        MemoryType.IMAGE -> Picture(memory, maxPicture, visibility, onOpen)
+        MemoryType.PDF -> Page(memory, visibility, onOpen)
         MemoryType.LINK -> LinkCard(memory, onOpen)
         MemoryType.TEXT, MemoryType.AUDIO -> Note(memory)
     }
 }
 
 /**
- * The picture itself, following its shape within limits; tapping it opens the
- * original too. A tall screenshot is cropped from the top at [maxHeight], so
- * what the sheet says about it is in view without scrolling.
+ * The best picture of a memory to hand at once: the full-size one once it is
+ * decoded, and meanwhile the tile's or the row's, already in the cache -- so
+ * the picture that flies up into the sheet is never an empty box.
  */
 @Composable
-private fun Picture(memory: Memory, maxHeight: Dp, onOpen: () -> Unit) {
-    val picture = rememberThumbnail(memory, targetPx = 1080)
+private fun sharpest(memory: Memory, targetPx: Int): ImageBitmap? =
+    rememberThumbnail(memory, targetPx) ?: Thumbnails.cached(memory, 360) ?: Thumbnails.cached(memory, 140)
+
+/**
+ * The picture itself, following its shape within limits; tapping it opens the
+ * original too. It travels up from the tile or row it was opened from.
+ */
+@Composable
+private fun Picture(memory: Memory, maxHeight: Dp, visibility: AnimatedVisibilityScope, onOpen: () -> Unit) {
+    val picture = sharpest(memory, targetPx = 1080)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val tallest = maxHeight.coerceAtLeast(200.dp)
         val height = picture?.let { (maxWidth * (it.height.toFloat() / it.width)).coerceIn(160.dp, tallest) } ?: 260.dp
@@ -173,16 +176,22 @@ private fun Picture(memory: Memory, maxHeight: Dp, onOpen: () -> Unit) {
                 .clickable(onClick = onOpen),
         ) {
             picture?.let {
-                Image(it, null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
+                Image(
+                    it,
+                    null,
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                    modifier = Modifier.fillMaxSize().travelling(memory.id, visibility),
+                )
             }
         }
     }
 }
 
-/** A PDF's first page on the media ground, as a sheet of paper. */
+/** A PDF's first page on the media ground, as a sheet of paper. It travels up from its tile too. */
 @Composable
-private fun Page(memory: Memory, onOpen: () -> Unit) {
-    val page = rememberThumbnail(memory, targetPx = 900)
+private fun Page(memory: Memory, visibility: AnimatedVisibilityScope, onOpen: () -> Unit) {
+    val page = sharpest(memory, targetPx = 900)
     Box(
         Modifier
             .fillMaxWidth()
@@ -198,7 +207,10 @@ private fun Page(memory: Memory, onOpen: () -> Unit) {
                 null,
                 contentScale = ContentScale.Crop,
                 alignment = Alignment.TopCenter,
-                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .travelling(memory.id, visibility)
+                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)),
             )
         } else {
             DocumentGlyph(Modifier.align(Alignment.Center).size(width = 72.dp, height = 94.dp))
@@ -323,7 +335,7 @@ private fun FoundText(memory: Memory, readText: String?) {
  * removes the memory -- a few seconds of undo stand in for a confirmation.
  */
 @Composable
-private fun Actions(action: OriginalAction, onOpen: () -> Unit, onDelete: () -> Unit) {
+private fun Actions(action: OriginalAction, onOpen: () -> Unit, onDelete: () -> Unit, modifier: Modifier = Modifier) {
     val enabled = action != OriginalAction.Missing
     val label = stringResource(
         when (action) {
@@ -336,7 +348,7 @@ private fun Actions(action: OriginalAction, onOpen: () -> Unit, onDelete: () -> 
     val ink = if (enabled) AmberOnContainer else InkOutline
 
     Row(
-        Modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 22.dp),
+        modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 22.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
