@@ -26,7 +26,9 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -216,29 +218,32 @@ internal fun <T : Any> SheetLayer(
                     .pointerInput(Unit) { detectTapGestures { onDismiss() } },
             )
 
-            Column(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .heightIn(max = windowHeight * maxFraction)
-                    .animateEnterExit(
-                        enter = slideInVertically(tween(OPEN_MS, easing = Settle)) { it },
-                        exit = slideOutVertically(tween(CLOSE_MS, easing = Settle)) { it },
-                    )
-                    .offset { IntOffset(0, drag.roundToInt()) }
-                    .onSizeChanged { sheetHeight = it.height.coerceAtLeast(1) }
-                    .nestedScroll(handOff)
-                    .draggable(
-                        orientation = Orientation.Vertical,
-                        state = rememberDraggableState { delta -> drag = (drag + delta).coerceAtLeast(0f) },
-                        onDragStopped = { velocity -> release(velocity) },
-                    )
-                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                    // swallow taps, so one on the sheet does not reach the scrim beneath
-                    .pointerInput(Unit) { detectTapGestures { } }
-                    .background(Ink),
-            ) {
-                content(current, visibility)
+            // the sheet stands on the keyboard when one is up, and never slides under the status bar
+            Box(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+                Column(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .heightIn(max = windowHeight * maxFraction)
+                        .animateEnterExit(
+                            enter = slideInVertically(tween(OPEN_MS, easing = Settle)) { it },
+                            exit = slideOutVertically(tween(CLOSE_MS, easing = Settle)) { it },
+                        )
+                        .offset { IntOffset(0, drag.roundToInt()) }
+                        .onSizeChanged { sheetHeight = it.height.coerceAtLeast(1) }
+                        .nestedScroll(handOff)
+                        .draggable(
+                            orientation = Orientation.Vertical,
+                            state = rememberDraggableState { delta -> drag = (drag + delta).coerceAtLeast(0f) },
+                            onDragStopped = { velocity -> release(velocity) },
+                        )
+                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                        // swallow taps, so one on the sheet does not reach the scrim beneath
+                        .pointerInput(Unit) { detectTapGestures { } }
+                        .background(Ink),
+                ) {
+                    content(current, visibility)
+                }
             }
         }
     }

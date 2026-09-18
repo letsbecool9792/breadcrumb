@@ -164,7 +164,7 @@ private fun ResultRow(
     val readText = result.hit?.readText ?: memory.readText
     val title = ResultText.title(memory, summary)
     val fragment = remember(memory, result.hit, words) {
-        ResultText.fragment(listOf(memory.rawText, memory.extractedText, readText, memory.title, summary), words)
+        ResultText.fragment(listOf(memory.rawText, memory.note, memory.extractedText, readText, memory.title, summary), words)
     }
     // the matched word warms to amber a moment after its row lands
     val glow = remember { Animatable(if (settled) 1f else 0f) }

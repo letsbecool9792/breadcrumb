@@ -45,6 +45,9 @@
     <string name="detail_copied">Copied</string>
     <string name="detail_no_app">No app here can open this</string>
     <string name="detail_delete">Delete</string>
+    <string name="detail_note">your note</string>
+    <string name="detail_note_edit">edit</string>
+    <string name="detail_note_done">Done</string>
     <string name="undo_deleted">deleted</string>
     <string name="undo_action">Undo</string>
 </resources>
