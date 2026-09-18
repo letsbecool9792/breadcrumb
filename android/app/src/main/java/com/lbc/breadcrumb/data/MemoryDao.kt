@@ -279,6 +279,21 @@ interface MemoryDao {
     )
     suspend fun setExtractedText(id: String, text: String, now: Long)
 
+    /**
+     * Writes the person's note, and queues the memory to be sent again so the
+     * server searches by it too -- which costs an embedding there, never a
+     * model call. From UPLOADING as well: the send in flight carries the old
+     * note, and PENDING stops it being marked synced.
+     *
+     * @param note null or blank for no note; the caller trims.
+     * @return 0 when nothing changed -- the same note, or a memory since deleted.
+     */
+    @Query(
+        "UPDATE memories SET note = :note, updatedAt = :now, syncState = 'PENDING' " +
+            "WHERE id = :id AND IFNULL(note, '') != IFNULL(:note, '')"
+    )
+    suspend fun setNote(id: String, note: String?, now: Long): Int
+
     @Query("DELETE FROM memories")
     suspend fun clear()
 }

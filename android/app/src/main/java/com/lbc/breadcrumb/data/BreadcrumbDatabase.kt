@@ -11,7 +11,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Memory::class, MemoryFts::class, PendingDelete::class],
-    version = 6,
+    version = 7,
     exportSchema = true,
     autoMigrations = [
         // v2: hasLink, so a memory can carry a LINK chip beside its primary type
@@ -28,6 +28,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         // pending_deletes. No backfill -- a null enrichedAt is what asks the
         // server, so every memory already synced fills itself in on the next pass.
         AutoMigration(from = 5, to = 6),
+        // v7: note, and the search index gains it. The index is rebuilt, since
+        // its triggers only see writes made after the migration.
+        AutoMigration(from = 6, to = 7, spec = BreadcrumbDatabase.BuildSearchIndex::class),
     ],
 )
 @TypeConverters(Converters::class)
