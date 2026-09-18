@@ -10,8 +10,10 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -107,6 +109,7 @@ internal fun Mosaic(
     entrances.settle(memories.map { it.id })
     // the field can have focus with nothing typed yet, the keyboard over the tiles
     KeyboardAwayOnDrag(grid.interactionSource)
+    val scope = rememberCoroutineScope()
     var mastheadHeight by remember { mutableIntStateOf(0) }
     val collapse by remember {
         derivedStateOf { mastheadCollapse(grid.firstVisibleItemIndex, grid.firstVisibleItemScrollOffset, mastheadHeight) }
@@ -140,7 +143,14 @@ internal fun Mosaic(
                 )
             }
         }
-        if (collapse > 0f) CollapsedMasthead(kept, shown = collapse, Modifier.align(Alignment.TopCenter))
+        if (collapse > 0f) {
+            CollapsedMasthead(
+                kept,
+                shown = collapse,
+                onTap = { scope.launch { grid.animateScrollToItem(0) } },
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
         DateScrubber(grid, memories, Modifier.align(Alignment.CenterEnd))
     }
 }

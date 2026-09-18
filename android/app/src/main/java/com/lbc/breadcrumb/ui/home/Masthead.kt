@@ -2,6 +2,7 @@ package com.lbc.breadcrumb.ui.home
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -64,10 +65,11 @@ internal fun Masthead(kept: String, onLongPress: (() -> Unit)?, modifier: Modifi
 /**
  * The strip the masthead shrinks into once it has scrolled out of sight:
  * the name small in the serif, the count in mono. [shown] runs 0 to 1 as the
- * masthead leaves, so the two hand over rather than cut.
+ * masthead leaves, so the two hand over rather than cut. Tapped, it takes the
+ * mosaic back to the top, as a phone's status bar does elsewhere.
  */
 @Composable
-internal fun CollapsedMasthead(kept: String, shown: Float, modifier: Modifier = Modifier) {
+internal fun CollapsedMasthead(kept: String, shown: Float, onTap: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier
             .graphicsLayer {
@@ -77,6 +79,13 @@ internal fun CollapsedMasthead(kept: String, shown: Float, modifier: Modifier = 
             }
             .fillMaxWidth()
             .background(Ink)
+            // only once it is really there: a strip still fading in is not something to tap
+            .clickable(
+                enabled = shown > 0.5f,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onTap,
+            )
             .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
