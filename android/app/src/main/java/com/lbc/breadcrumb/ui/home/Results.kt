@@ -7,7 +7,13 @@ import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.graphicsLayer
@@ -97,7 +103,11 @@ internal fun Results(state: SearchState.Searching, now: Long, onOpen: (Result) -
     // back into view. A new search starts afresh.
     val arrived = remember(state.phrase) { mutableSetOf<String>() }
 
+    val list = rememberLazyListState()
+    KeyboardAwayOnDrag(list.interactionSource)
+
     LazyColumn(
+        state = list,
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 56.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier.fillMaxSize(),
@@ -122,6 +132,24 @@ internal fun Results(state: SearchState.Searching, now: Long, onOpen: (Result) -
                     )
                     .arriving(result.memory.id, index, arrived),
             )
+        }
+    }
+}
+
+/**
+ * A list being dragged wants its whole height: the keyboard goes, and the
+ * search field lets go of focus. Only a drag -- a list moving on its own, as
+ * rows glide to their ranked places, leaves the keyboard be.
+ */
+@Composable
+internal fun KeyboardAwayOnDrag(interactions: InteractionSource) {
+    val dragged by interactions.collectIsDraggedAsState()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    LaunchedEffect(dragged) {
+        if (dragged) {
+            keyboard?.hide()
+            focus.clearFocus()
         }
     }
 }
