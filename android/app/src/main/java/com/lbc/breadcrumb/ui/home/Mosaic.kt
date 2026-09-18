@@ -105,6 +105,8 @@ internal fun Mosaic(
     }
 
     entrances.settle(memories.map { it.id })
+    // the field can have focus with nothing typed yet, the keyboard over the tiles
+    KeyboardAwayOnDrag(grid.interactionSource)
     var mastheadHeight by remember { mutableIntStateOf(0) }
     val collapse by remember {
         derivedStateOf { mastheadCollapse(grid.firstVisibleItemIndex, grid.firstVisibleItemScrollOffset, mastheadHeight) }
