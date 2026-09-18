@@ -427,7 +427,7 @@ Do not start the next step until the current one is ticked. Do not batch several
 ### Phase 4 — Retrieval
 
 **Order changed 2026-09-18:** the server steps first — 4.1, 4.4, 4.3, all tested from the
-terminal — then the UI steps 4.2 and 4.5 back to back (still one commit each). A keyword query
+terminal — then the UI steps 4.2 and 4.5 back to back (committed apart), then 4.6. A keyword query
 ("government") against real data showed vector-only search ranking noise, and a UI tested on
 that would feel broken for exactly what people type. 4.3 adds its filters to both halves.
 
@@ -475,14 +475,39 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
       · **a new phrase takes ~2–3s**: the parse (1.3–2.3s) runs before the embedding. At 4.2,
         embed the raw phrase in parallel and reuse it when the parse leaves it unchanged
       · tested by the user with curl against the real collection
-- [ ] **4.2** Real search UI, replacing the debug list
+- [x] **4.2** Real search UI, replacing the debug list
       · *test:* type a query on device, see ranked results
       · **deletes do not sync**, so the server holds memories the phone has deleted (16 there
         against 6 on the phone, 2026-09-18). Drop result ids the phone does not hold
-- [ ] **4.5** Tap a result → open the original artifact
+      · *test:* `./gradlew testDebugUnitTest` — `ResultTextTest` (fragments, titles, ages, the
+        counter), `SearchJoinTest` (server order kept, deleted ids dropped), `ServerClientTest`
+        (the search contract); on-device `MemoryDaoTest` (`getByIds`, `searchOnce`)
+      · design boards 1–2: the mosaic at rest, a ranked list while typing. The phone's word
+        index answers at once; the server's ranking replaces it after a 450ms pause, and the
+        word matches stand when the server is out of reach ("offline · words only")
+      · the debug list survives behind a long press on the wordmark, debug builds only
+      · the app is dark whatever the phone's theme, as the canvas decides
+      · verified on device: mosaic, ranked results with the lit match, filter searches,
+        deleted memories absent, clearing and Back
+- [x] **4.5** Tap a result → open the original artifact
       · *test:* tap a saved screenshot → opens in a viewer
       · *test:* tap a saved PDF → opens in a PDF viewer (originals are app-private, so
         this needs a FileProvider to hand another app read access)
+      · *test:* `./gradlew testDebugUnitTest` — `OriginalsTest` (the action per kind),
+        `UrlTextTest`; on-device `OriginalsProviderTest` — a stored original read back through
+        its content URI, a read-only one-off grant, the database and cache unreachable
+      · design board 3, as a sheet: the artifact, provenance, the text found, one action —
+        open original / open link / copy text
+      · verified on device: screenshot → gallery, PDF → PDF viewer, link → browser, note copied
+      · built and tested together with 4.2 at the user's request, committed apart
+- [~] **4.6** Search screens, second pass — from trying 4.2 and 4.5 on the phone
+      · the detail sheet has a height limit: a tall screenshot opened it full screen,
+        hiding the mosaic it came from
+      · a memory opened from the mosaic shows what a search shows — the model's summary and
+        what it saw — so the enrichment has to live on the phone, not only on the server
+      · delete from the detail, and the delete reaching the server
+      · a design pass: typography (serif titles are the user's suggestion), motion, the
+        landing screen — ideas first, then built
 
 ### Phase 5 — Seeding
 
