@@ -3,6 +3,7 @@ package com.lbc.breadcrumb.data
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
@@ -39,6 +40,10 @@ interface MemoryDao {
 
     @Query("SELECT * FROM memories WHERE id = :id")
     suspend fun getById(id: String): Memory?
+
+    /** One memory, live: an open detail shows its summary the moment it arrives. */
+    @Query("SELECT * FROM memories WHERE id = :id")
+    fun observeById(id: String): Flow<Memory?>
 
     /**
      * The rows behind a server search's results. Order is not kept -- the
@@ -96,9 +101,12 @@ interface MemoryDao {
     /**
      * Only from UPLOADING: if OCR text arrived mid-upload the row is PENDING
      * again, and marking it synced would strand the newer text off the server.
+     *
+     * Clears [Memory.enrichedAt]: the server may have read the memory again,
+     * so the phone's copy of what it made of it is stale until asked for.
      */
     @Query(
-        "UPDATE memories SET syncState = 'SYNCED', remoteId = :remoteId " +
+        "UPDATE memories SET syncState = 'SYNCED', remoteId = :remoteId, enrichedAt = NULL " +
             "WHERE id = :id AND syncState = 'UPLOADING'"
     )
     suspend fun markSynced(id: String, remoteId: String): Int
@@ -129,8 +137,83 @@ interface MemoryDao {
     )
     suspend fun imagesAwaitingRead(minChars: Int, ocrDeadline: Long, limit: Int): List<Memory>
 
-    @Query("UPDATE memories SET imageSentAt = :now WHERE id = :id")
+    /** A picture read is a new enrichment on the server, so the phone's copy is stale too. */
+    @Query("UPDATE memories SET imageSentAt = :now, enrichedAt = NULL WHERE id = :id")
     suspend fun markImageSent(id: String, now: Long)
+
+    /**
+     * Memories the server holds whose enrichment the phone has not copied
+     * since they were last sent (step 4.6).
+     */
+    @Query(
+        "SELECT id FROM memories WHERE syncState = 'SYNCED' AND enrichedAt IS NULL " +
+            "ORDER BY capturedAt DESC LIMIT :limit"
+    )
+    suspend fun awaitingEnrichment(limit: Int): List<String>
+
+    /**
+     * Keeps what the server made of a memory. Only while it is still synced:
+     * a memory re-queued in the meantime will be read again, and asked about
+     * again after.
+     *
+     * Leaves updatedAt alone -- the phone changed nothing -- while the search
+     * index's triggers pick up the new summary.
+     */
+    @Query(
+        "UPDATE memories SET summary = :summary, kind = :kind, readText = :readText, enrichedAt = :now " +
+            "WHERE id = :id AND syncState = 'SYNCED'"
+    )
+    suspend fun setEnrichment(id: String, summary: String?, kind: String?, readText: String?, now: Long): Int
+
+    // --- deletes ---------------------------------------------------------------
+
+    @Upsert
+    suspend fun rememberDelete(delete: PendingDelete)
+
+    @Query("DELETE FROM pending_deletes WHERE id = :id")
+    suspend fun forgetDelete(id: String)
+
+    /** Deletes the server has not heard yet, oldest first. */
+    @Query("SELECT id FROM pending_deletes ORDER BY requestedAt ASC LIMIT :limit")
+    suspend fun pendingDeletes(limit: Int): List<String>
+
+    @Query("DELETE FROM pending_deletes WHERE id IN (:ids)")
+    suspend fun forgetDeletes(ids: List<String>)
+
+    @Query("SELECT COUNT(*) FROM pending_deletes")
+    suspend fun pendingDeleteCount(): Int
+
+    /**
+     * Deletes a memory here and remembers to delete it on the server, in one
+     * transaction, so a crash between the two cannot leave a delete that never
+     * reaches the cloud. The original file is the caller's to remove.
+     */
+    @Transaction
+    suspend fun deleteEverywhere(memory: Memory, now: Long) {
+        delete(memory)
+        rememberDelete(PendingDelete(memory.id, now))
+    }
+
+    /**
+     * Undoes [deleteEverywhere]. The server may already have heard the delete,
+     * so the caller restores the memory as PENDING: sending it again costs
+     * nothing if the server still holds it, and restores it if not.
+     */
+    @Transaction
+    suspend fun restore(memory: Memory) {
+        upsert(memory)
+        forgetDelete(memory.id)
+    }
+
+    @Query("INSERT OR REPLACE INTO pending_deletes (id, requestedAt) SELECT id, :now FROM memories")
+    suspend fun rememberDeletingAll(now: Long)
+
+    /** Every memory, here and on the server. */
+    @Transaction
+    suspend fun clearEverywhere(now: Long) {
+        rememberDeletingAll(now)
+        clear()
+    }
 
     /** Queues every refused memory again -- after a fix, on demand. */
     @Query("UPDATE memories SET syncState = 'PENDING' WHERE syncState = 'FAILED'")

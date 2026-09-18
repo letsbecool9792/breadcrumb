@@ -90,8 +90,27 @@ data class Memory(
      * processed. The Gemini ingest pass (step 3.3) refines it.
      */
     val title: String? = null,
+
+    /**
+     * The model's one line about it, copied back from the server (step 4.6)
+     * so a memory opened from the mosaic says what it is without a search,
+     * and so local word search finds it by that line offline.
+     */
     val summary: String? = null,
     val entitiesJson: String? = null,
+
+    /** What kind of thing the model took it for -- "job posting", "screenshot". Copied back with [summary]. */
+    val kind: String? = null,
+
+    /** What the model saw in a picture OCR could barely read (step 3.6). Copied back with [summary]. */
+    val readText: String? = null,
+
+    /**
+     * When the phone last copied [summary], [kind] and [readText] from the
+     * server. Null means "ask": every send makes the copy stale, since the
+     * server may have read the memory again.
+     */
+    val enrichedAt: Long? = null,
 
     /** Server-side id, once this row has synced. */
     val remoteId: String? = null,

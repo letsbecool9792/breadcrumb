@@ -166,6 +166,61 @@ class MemoryDaoTest {
     }
 
     @Test
+    fun deleteEverywhere_removesTheRowAndRemembersTheDelete() = runBlocking {
+        val memory = Memory(id = "gone", type = MemoryType.TEXT, rawText = "Qualcomm")
+        dao.upsert(memory)
+
+        dao.deleteEverywhere(memory, now = 5_000)
+
+        assertNull(dao.getById("gone"))
+        assertEquals(listOf("gone"), dao.pendingDeletes(limit = 10))
+        // and it is gone from local search too
+        assertTrue(dao.searchOnce(FtsQuery.matchExpression("qualcomm")!!, 10).isEmpty())
+    }
+
+    @Test
+    fun restore_bringsTheMemoryBackAndForgetsTheDelete() = runBlocking {
+        val memory = Memory(id = "back", type = MemoryType.TEXT, rawText = "Qualcomm")
+        dao.upsert(memory)
+        dao.deleteEverywhere(memory, now = 5_000)
+
+        dao.restore(memory)
+
+        assertEquals(memory, dao.getById("back"))
+        assertEquals(0, dao.pendingDeleteCount())
+        assertEquals(listOf("back"), dao.searchOnce(FtsQuery.matchExpression("qualcomm")!!, 10).map { it.id })
+    }
+
+    @Test
+    fun clearEverywhere_remembersADeleteForEveryMemory() = runBlocking {
+        dao.upsertAll(listOf(Memory(id = "a", type = MemoryType.TEXT), Memory(id = "b", type = MemoryType.LINK)))
+
+        dao.clearEverywhere(now = 5_000)
+
+        assertEquals(0, dao.count())
+        assertEquals(setOf("a", "b"), dao.pendingDeletes(limit = 10).toSet())
+    }
+
+    @Test
+    fun aCopiedSummaryIsFoundByLocalSearch() = runBlocking {
+        dao.upsert(Memory(id = "shot", type = MemoryType.IMAGE, syncState = SyncState.SYNCED))
+
+        dao.setEnrichment("shot", summary = "Comments joking about the TVA", kind = "screenshot", readText = null, now = 5_000)
+
+        // offline, the phone now finds a picture by what the model said of it
+        assertEquals(listOf("shot"), dao.searchOnce(FtsQuery.matchExpression("tva")!!, 10).map { it.id })
+    }
+
+    @Test
+    fun enrichmentIsNotKeptForAMemoryQueuedAgain() = runBlocking {
+        // re-queued between the ask and the answer: it will be read again, and asked about after
+        dao.upsert(Memory(id = "moving", type = MemoryType.TEXT, syncState = SyncState.PENDING))
+
+        assertEquals(0, dao.setEnrichment("moving", "stale", null, null, now = 5_000))
+        assertNull(dao.getById("moving")!!.enrichedAt)
+    }
+
+    @Test
     fun searchableText_joinsPopulatedFieldsOnly() {
         val memory = Memory(
             type = MemoryType.IMAGE,

@@ -10,8 +10,8 @@ import androidx.room.migration.AutoMigrationSpec
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Memory::class, MemoryFts::class],
-    version = 5,
+    entities = [Memory::class, MemoryFts::class, PendingDelete::class],
+    version = 6,
     exportSchema = true,
     autoMigrations = [
         // v2: hasLink, so a memory can carry a LINK chip beside its primary type
@@ -24,6 +24,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         // v5: imageSentAt. No backfill -- null means "not sent yet", which is
         // true of every image saved before this, and they are worth reading.
         AutoMigration(from = 4, to = 5),
+        // v6: kind, readText and enrichedAt copied back from the server, and
+        // pending_deletes. No backfill -- a null enrichedAt is what asks the
+        // server, so every memory already synced fills itself in on the next pass.
+        AutoMigration(from = 5, to = 6),
     ],
 )
 @TypeConverters(Converters::class)
