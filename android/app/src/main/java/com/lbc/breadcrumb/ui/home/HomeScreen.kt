@@ -50,6 +50,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -96,10 +97,13 @@ import java.time.LocalDate
  *
  * @param onOpenDebug long-pressing the wordmark opens the old debug list,
  *   which keeps the server status and the sync button. Null outside debug builds.
+ * @param keepRequests counts asks to open the "+" sheet from outside -- the
+ *   launcher shortcut. Each new count opens it.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel()) {
+fun HomeScreen(onOpenDebug: (() -> Unit)?, keepRequests: Int = 0, viewModel: HomeViewModel = viewModel()) {
+    LaunchedEffect(keepRequests) { viewModel.onKeepRequest(keepRequests) }
     val memories by viewModel.memories.collectAsStateWithLifecycle()
     val unsent by viewModel.unsent.collectAsStateWithLifecycle()
     val search = viewModel.search

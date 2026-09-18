@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon: straight to the sheet for keeping something. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="keep"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_keep"
+        android:shortcutShortLabel="@string/shortcut_keep_short"
+        android:shortcutLongLabel="@string/shortcut_keep_long">
+        <!-- targetPackage is the applicationId, the same in every build type -->
+        <intent
+            android:action="com.lbc.breadcrumb.action.KEEP"
+            android:targetPackage="com.lbc.breadcrumb"
+            android:targetClass="com.lbc.breadcrumb.MainActivity" />
+    </shortcut>
+</shortcuts>

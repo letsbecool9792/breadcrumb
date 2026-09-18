@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A plus in the app's amber, for the launcher shortcut. Drawn on the 108dp
+     adaptive-icon canvas; the plus sits well inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:strokeColor="#FFFFC46B"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:pathData="M54,38 L54,70 M38,54 L70,54" />
+</vector>

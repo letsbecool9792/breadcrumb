@@ -48,6 +48,11 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Long-press the icon: "Keep something" opens the "+" sheet. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- Share sheet target. excludeFromRecents + noHistory + empty
