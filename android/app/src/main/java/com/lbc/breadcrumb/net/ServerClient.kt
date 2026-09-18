@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -57,6 +58,53 @@ interface MemoryUploadApi {
     suspend fun uploadImages(images: List<OutgoingImage>): Map<String, UploadResult>
 }
 
+/** What a search came back with (steps 4.1-4.4). */
+sealed interface SearchOutcome {
+    /**
+     * Ranked best first. [interpretation] is how the server took the phrase
+     * apart into words and filters (4.3); null when its parse failed and it
+     * searched the phrase as typed.
+     */
+    data class Found(val hits: List<SearchHit>, val interpretation: Interpretation?) : SearchOutcome
+
+    /**
+     * No ranked answer. [offline] tells "could not reach it" from "it answered
+     * and could not search" -- a busy model, say -- since the screen says
+     * which. The phone's own word search stands in either way.
+     */
+    data class Unavailable(val reason: String, val offline: Boolean) : SearchOutcome
+}
+
+/**
+ * One ranked result. Only what the phone does not already hold: its own row
+ * has the text, the original and the thumbnail, looked up by [id].
+ */
+@Serializable
+data class SearchHit(
+    val id: String,
+    /** Reciprocal-rank fused; only its order means anything. Null for a filter-only listing. */
+    val score: Double? = null,
+    val ranks: Ranks = Ranks(),
+    /** Gemini's one line about it: the "why this matched" for a match by meaning. */
+    val summary: String? = null,
+    /** What the model saw in a picture OCR could barely read. */
+    val readText: String? = null,
+)
+
+/** Where a result placed by meaning and by words; null where it did not place. */
+@Serializable
+data class Ranks(val vector: Int? = null, val text: Int? = null)
+
+/** The server's reading of a search phrase (step 4.3). Dates are inclusive, YYYY-MM-DD. */
+@Serializable
+data class Interpretation(
+    val query: String = "",
+    val types: List<String> = emptyList(),
+    val from: String? = null,
+    val to: String? = null,
+    val sourceApp: String? = null,
+)
+
 /** One picture on its way to be read: the memory it belongs to, and its bytes. */
 data class OutgoingImage(val memoryId: String, val mimeType: String, val bytes: ByteArray) {
     // data class equality on a ByteArray compares references, which would make
@@ -69,9 +117,9 @@ data class OutgoingImage(val memoryId: String, val mimeType: String, val bytes: 
 }
 
 /**
- * The app's only way to the backend. Endpoints arrive one per step: health,
- * ingest, and search at 4.1. Hand-written rather than generated -- one server,
- * one client, a handful of endpoints.
+ * The app's only way to the backend: health, ingest, pictures and search.
+ * Hand-written rather than generated -- one server, one client, a handful of
+ * endpoints.
  */
 class ServerClient(
     private val baseUrl: String,
@@ -84,6 +132,12 @@ class ServerClient(
     healthTimeoutMillis: Long = 5_000,
     /** Ingest runs two model calls server-side; measured around 13s per memory. */
     uploadTimeoutMillis: Long = 90_000,
+    /**
+     * A parse, an embedding and the fused search: 2-3s when the models answer
+     * at once, more when the embedding is retried. Someone is waiting, and
+     * the phone's own word search is on screen meanwhile.
+     */
+    searchTimeoutMillis: Long = 20_000,
 ) : MemoryUploadApi {
 
     private val healthHttp = http.newBuilder()
@@ -93,6 +147,34 @@ class ServerClient(
     private val uploadHttp = http.newBuilder()
         .callTimeout(uploadTimeoutMillis, TimeUnit.MILLISECONDS)
         .build()
+
+    private val searchHttp = http.newBuilder()
+        .callTimeout(searchTimeoutMillis, TimeUnit.MILLISECONDS)
+        .build()
+
+    /**
+     * Ranked search (steps 4.1-4.4). The phrase goes as typed: taking it apart
+     * into words and filters is the server's job (4.3).
+     */
+    suspend fun search(query: String, limit: Int = 30): SearchOutcome = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/search".toHttpUrl().newBuilder()
+            .addQueryParameter("q", query)
+            .addQueryParameter("limit", limit.toString())
+            .build()
+        try {
+            searchHttp.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                val body = response.body.string()
+                if (!response.isSuccessful) {
+                    return@use SearchOutcome.Unavailable("HTTP ${response.code}: ${body.take(200)}", offline = false)
+                }
+                runCatching { json.decodeFromString<SearchReply>(body) }
+                    .map { SearchOutcome.Found(it.results, it.interpretation) }
+                    .getOrElse { SearchOutcome.Unavailable("unreadable answer: ${body.take(200)}", offline = false) }
+            }
+        } catch (e: IOException) {
+            SearchOutcome.Unavailable(describe(e), offline = true)
+        }
+    }
 
     suspend fun health(): ServerStatus = withContext(Dispatchers.IO) {
         val request = Request.Builder().url("$baseUrl/health").build()
@@ -224,7 +306,10 @@ private data class MemoryPayload(
     }
 }
 
-/** No default for [results]: a body without it -- an error page, a refusal -- must not decode into "no answers". */
+/** No default for [results], as with ingest: an error body must not read as "found nothing". */
+@Serializable
+private data class SearchReply(val results: List<SearchHit>, val interpretation: Interpretation? = null)
+
 /** base64 rather than multipart: no parser to add on either side, and the model wants it this way. */
 @Serializable
 private data class ImagePayload(val id: String, val mimeType: String, val data: String)

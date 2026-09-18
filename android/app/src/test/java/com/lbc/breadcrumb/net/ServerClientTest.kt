@@ -222,6 +222,91 @@ class ServerClientTest {
         assertTrue(client().upload(listOf(memory("m1")))["m1"] is UploadResult.Unavailable)
     }
 
+    // --- search (steps 4.1-4.4); the shape is server/src/search.ts's SearchAnswer ---
+
+    @Test
+    fun `a search sends the phrase as typed and keeps the server's ranking`() = runBlocking {
+        respond(
+            200,
+            """{"query":"that internship screenshot from april",
+                "interpretation":{"query":"internship","types":["IMAGE"],"from":"2026-04-01","to":"2026-04-30","sourceApp":null},
+                "results":[
+                  {"id":"b","score":0.0325,"ranks":{"vector":2,"text":1},"type":"IMAGE","hasLink":false,
+                   "capturedAt":"2026-09-10T10:00:00.000Z","summary":"Samsung internship screenshot","readText":null},
+                  {"id":"a","score":0.0164,"ranks":{"vector":1,"text":null},"type":"TEXT","summary":null}
+                ]}""",
+        )
+
+        val outcome = client().search("that internship screenshot from april", limit = 20)
+
+        val request = server.takeRequest()
+        assertEquals("/search", request.url.encodedPath)
+        // taking the phrase apart is the server's job (4.3), so it goes whole
+        assertEquals("that internship screenshot from april", request.url.queryParameter("q"))
+        assertEquals("20", request.url.queryParameter("limit"))
+
+        assertTrue("expected Found, got $outcome", outcome is SearchOutcome.Found)
+        val found = outcome as SearchOutcome.Found
+        assertEquals(listOf("b", "a"), found.hits.map { it.id })
+        assertEquals(Ranks(vector = 2, text = 1), found.hits[0].ranks)
+        assertEquals(Ranks(vector = 1, text = null), found.hits[1].ranks)
+        assertEquals("Samsung internship screenshot", found.hits[0].summary)
+        assertEquals(Interpretation("internship", listOf("IMAGE"), "2026-04-01", "2026-04-30", null), found.interpretation)
+    }
+
+    @Test
+    fun `a phrase the server could not take apart still brings its results`() = runBlocking {
+        respond(
+            200,
+            """{"query":"qualcomm","interpretation":null,"interpretationError":"503 UNAVAILABLE",
+                "results":[{"id":"a","score":0.03,"ranks":{"vector":1,"text":1}}]}""",
+        )
+
+        val found = client().search("qualcomm") as SearchOutcome.Found
+
+        assertEquals(null, found.interpretation)
+        assertEquals(listOf("a"), found.hits.map { it.id })
+    }
+
+    @Test
+    fun `an all-filter listing arrives unscored`() = runBlocking {
+        respond(200, """{"query":"links from whatsapp","results":[{"id":"a","score":null,"ranks":{"vector":null,"text":null}}]}""")
+
+        val found = client().search("links from whatsapp") as SearchOutcome.Found
+
+        assertEquals(null, found.hits.single().score)
+    }
+
+    @Test
+    fun `a server that cannot search is unavailable, and not offline`() = runBlocking {
+        // 503: the embedding model is busy; 502: it refused
+        respond(503, """{"error":"could not read the search","reason":"429 RESOURCE_EXHAUSTED","retryable":true}""")
+        val busy = client().search("x")
+        assertEquals(false, (busy as SearchOutcome.Unavailable).offline)
+
+        respond(502, """{"error":"could not read the search","reason":"400 API key not valid"}""")
+        assertEquals(false, (client().search("x") as SearchOutcome.Unavailable).offline)
+    }
+
+    @Test
+    fun `an answer the app cannot read is unavailable rather than empty`() = runBlocking {
+        // "found nothing" would be a lie; the phone's own word search should stand
+        respond(200, "OK")
+
+        assertTrue(client().search("x") is SearchOutcome.Unavailable)
+    }
+
+    @Test
+    fun `no server at all is offline`() = runBlocking {
+        val client = client()
+        server.close()
+
+        val outcome = client.search("x") as SearchOutcome.Unavailable
+
+        assertTrue(outcome.offline)
+        assertTrue(outcome.reason.contains("adb reverse"))
+    }
+
     @Test
     fun `a server that never answers times out`() = runBlocking {
         server.enqueue(
