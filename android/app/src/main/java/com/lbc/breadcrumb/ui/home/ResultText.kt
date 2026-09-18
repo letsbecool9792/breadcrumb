@@ -3,6 +3,7 @@ package com.lbc.breadcrumb.ui.home
 import com.lbc.breadcrumb.capture.UrlText
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
+import com.lbc.breadcrumb.data.SyncState
 import com.lbc.breadcrumb.net.Interpretation
 import java.time.Instant
 import java.time.LocalDate
@@ -138,6 +139,27 @@ object ResultText {
             source(memory),
             memory.chips.joinToString(" + ") { it.name.lowercase() },
         ).joinToString(" · ")
+
+    /**
+     * Where a memory has got to, for its detail, when it is not all done:
+     * the phone still reading it, not yet on the server (so found by its
+     * words, not yet by meaning), or refused there. Null once it is synced
+     * and read -- the ordinary case says nothing.
+     */
+    fun status(memory: Memory): String? {
+        val reading = when {
+            memory.extractedText != null -> null
+            memory.type == MemoryType.LINK -> "page not read yet"
+            (memory.type == MemoryType.IMAGE || memory.type == MemoryType.PDF) && memory.localUri != null -> "still reading it"
+            else -> null
+        }
+        val sending = when (memory.syncState) {
+            SyncState.SYNCED -> null
+            SyncState.FAILED -> "the server refused it"
+            SyncState.PENDING, SyncState.UPLOADING -> "not sent yet · words only"
+        }
+        return listOfNotNull(reading, sending).joinToString(" · ").ifEmpty { null }
+    }
 
     /** The resting count, e.g. "17 kept", or "17 kept · 2 unsent" while uploads are owed. */
     fun kept(total: Int, unsent: Int): String =
