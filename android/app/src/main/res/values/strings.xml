@@ -30,4 +30,16 @@
     <string name="results_nothing_hint">try fewer words, or describe it\nthe way you\'d say it out loud</string>
     <string name="results_words_only">No saved words match</string>
     <string name="results_words_only_hint">ranked search is out of reach, so this\nlooked for the words themselves</string>
+
+    <string name="detail_open_original">Open original</string>
+    <string name="detail_open_link">Open link</string>
+    <string name="detail_copy_text">Copy text</string>
+    <string name="detail_missing">Original isn\'t on this phone</string>
+    <string name="detail_saved">saved</string>
+    <string name="detail_from">from</string>
+    <string name="detail_taken">taken</string>
+    <string name="detail_text_found">text found</string>
+    <string name="detail_seen">what it shows</string>
+    <string name="detail_copied">Copied</string>
+    <string name="detail_no_app">No app here can open this</string>
 </resources>

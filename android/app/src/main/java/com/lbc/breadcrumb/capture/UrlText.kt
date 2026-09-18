@@ -12,6 +12,16 @@ object UrlText {
     fun containsUrl(text: String?): Boolean = text != null && URL.containsMatchIn(text)
 
     /**
+     * The first URL in [text], ready to open: trailing punctuation from the
+     * sentence around it dropped, and a bare "www." given its scheme.
+     */
+    fun firstUrl(text: String?): String? {
+        val url = text?.let { URL.find(it)?.value }?.trimEnd('.', ',', ')', ']', '!', '?', ';', '"', '\'')
+            ?: return null
+        return if (url.startsWith("www.", ignoreCase = true)) "https://$url" else url
+    }
+
+    /**
      * The host of the first URL in [text], as a person would name the site:
      * "https://www.github.com/square/okhttp" -> "github.com".
      */

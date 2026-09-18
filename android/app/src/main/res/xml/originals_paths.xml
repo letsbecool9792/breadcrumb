@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the originals FileProvider may hand out: the store's own folder
+     (OriginalStore's filesDir/originals) and nothing else. Another app opening
+     a saved screenshot or PDF gets a content URI with a one-off read grant,
+     never a path. -->
+<paths>
+    <files-path name="originals" path="originals/" />
+</paths>

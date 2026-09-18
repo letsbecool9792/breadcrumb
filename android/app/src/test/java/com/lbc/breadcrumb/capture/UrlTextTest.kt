@@ -37,6 +37,16 @@ class UrlTextTest {
     }
 
     @Test
+    fun `the first url comes out ready to open`() {
+        assertEquals("https://github.com/square/okhttp", UrlText.firstUrl("see https://github.com/square/okhttp."))
+        assertEquals("https://first.com", UrlText.firstUrl("https://first.com and https://second.com"))
+        assertEquals("https://www.example.com/menu", UrlText.firstUrl("(www.example.com/menu)"))
+        assertEquals("http://example.com/a?b=1", UrlText.firstUrl("http://example.com/a?b=1"))
+        assertNull(UrlText.firstUrl("no links here"))
+        assertNull(UrlText.firstUrl(null))
+    }
+
+    @Test
     fun `text without a url has no host`() {
         assertNull(UrlText.firstHost("no links here"))
         assertNull(UrlText.firstHost(null))

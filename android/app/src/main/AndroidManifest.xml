@@ -116,6 +116,20 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:theme="@style/Theme.Breadcrumb.Capture" />
 
+        <!-- Hands a stored original to the app that opens it (step 4.5).
+             Originals are app-private (architecture rule 1), so another app
+             can only read one through a content URI granted for that one
+             intent. Not exported: grants are the only way in. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.originals"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/originals_paths" />
+        </provider>
+
         <service
             android:name=".capture.CaptureTileService"
             android:exported="true"
