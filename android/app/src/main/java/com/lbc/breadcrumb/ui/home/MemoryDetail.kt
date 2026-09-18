@@ -425,11 +425,17 @@ private fun Provenance(memory: Memory, now: Long) {
     }
 }
 
-/** What made it findable: the words OCR read, and what the model saw in a picture. */
+/**
+ * What made it findable: the words the phone read -- in a picture, a PDF --
+ * and what the model saw in a picture. A long PDF shows its opening; all of
+ * it is searched.
+ */
 @Composable
 private fun FoundText(memory: Memory, readText: String?) {
     val sections = listOfNotNull(
-        memory.extractedText?.trim()?.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.detail_text_found) to it },
+        memory.extractedText?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            stringResource(R.string.detail_text_found) to ResultText.opening(it, FOUND_TEXT_SHOWN)
+        },
         readText?.trim()?.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.detail_seen) to it },
     )
     sections.forEach { (label, text) ->
@@ -441,6 +447,9 @@ private fun FoundText(memory: Memory, readText: String?) {
         }
     }
 }
+
+/** Characters of found text shown in full before the rest is left to search. */
+private const val FOUND_TEXT_SHOWN = 1_600
 
 // --- the one action ----------------------------------------------------------
 

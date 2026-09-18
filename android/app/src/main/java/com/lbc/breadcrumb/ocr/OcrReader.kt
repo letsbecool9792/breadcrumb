@@ -45,6 +45,13 @@ class MlKitOcrReader : OcrReader {
 
     override suspend fun read(file: File): String {
         val image = decode(file) ?: return ""
+        return recognize(image)
+    }
+
+    /** Reads a bitmap already in hand -- a PDF page rendered for the purpose. */
+    suspend fun read(bitmap: Bitmap): String = recognize(InputImage.fromBitmap(bitmap, 0))
+
+    private suspend fun recognize(image: InputImage): String {
         val client = recognizer
             ?: TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).also { recognizer = it }
         return OcrRules.clean(client.process(image).await().text)

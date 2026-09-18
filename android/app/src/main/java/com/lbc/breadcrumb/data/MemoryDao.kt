@@ -72,17 +72,17 @@ interface MemoryDao {
      * is how those get another chance, once something has changed.
      */
     /**
-     * @param ocrDeadline an image saved after this is held back while OCR has
-     *   still to read it: sending it now costs a Gemini pass on a memory whose
-     *   words arrive seconds later, and another when they do. Images older
-     *   than the deadline go regardless, so a read that never finishes cannot
-     *   strand a memory off the server.
+     * @param ocrDeadline an image or PDF saved after this is held back while
+     *   the phone has still to read it: sending it now costs a Gemini pass on a
+     *   memory whose words arrive seconds later, and another when they do.
+     *   Older ones go regardless, so a read that never finishes cannot strand
+     *   a memory off the server.
      * @param exclude ids held back for now -- memories whose capture sheet is
      *   still open, where a note may yet be written.
      */
     @Query(
         "SELECT * FROM memories WHERE syncState = 'PENDING' " +
-            "AND NOT (type = 'IMAGE' AND extractedText IS NULL AND localUri IS NOT NULL " +
+            "AND NOT (type IN ('IMAGE', 'PDF') AND extractedText IS NULL AND localUri IS NOT NULL " +
             "AND capturedAt > :ocrDeadline) " +
             "AND id NOT IN (:exclude) " +
             "ORDER BY capturedAt ASC LIMIT :limit"
@@ -253,19 +253,20 @@ interface MemoryDao {
     suspend fun searchOnce(match: String, limit: Int): List<Memory>
 
     /**
-     * Images whose text has not been read yet, newest first, so the one just
-     * saved is read ahead of any backlog.
+     * Images and PDFs whose text has not been read yet, newest first, so the
+     * one just saved is read ahead of any backlog -- which includes every PDF
+     * saved before PDFs were read at all.
      *
      * @param exclude ids to pass over -- reads that already failed this run.
      */
     @Query(
-        "SELECT * FROM memories WHERE type = 'IMAGE' AND extractedText IS NULL " +
+        "SELECT * FROM memories WHERE type IN ('IMAGE', 'PDF') AND extractedText IS NULL " +
             "AND id NOT IN (:exclude) ORDER BY capturedAt DESC LIMIT :limit"
     )
-    suspend fun unreadImages(exclude: List<String>, limit: Int): List<Memory>
+    suspend fun unreadOriginals(exclude: List<String>, limit: Int): List<Memory>
 
-    @Query("SELECT COUNT(*) FROM memories WHERE type = 'IMAGE' AND extractedText IS NULL")
-    fun observeUnreadImageCount(): Flow<Int>
+    @Query("SELECT COUNT(*) FROM memories WHERE type IN ('IMAGE', 'PDF') AND extractedText IS NULL")
+    fun observeUnreadCount(): Flow<Int>
 
     /**
      * An UPDATE rather than an upsert of the whole row: it cannot bring back a

@@ -17,6 +17,18 @@ class ResultTextTest {
     private val hour = 60 * 60 * 1000L
     private val day = 24 * hour
 
+    // --- a long text's opening ---------------------------------------------------
+
+    @Test
+    fun `a long text shows its opening, cut at a word`() {
+        assertEquals("Data Structures …", ResultText.opening("Data Structures week six", max = 18))
+    }
+
+    @Test
+    fun `a short text is shown whole`() {
+        assertEquals("Data Structures", ResultText.opening("Data Structures", max = 18))
+    }
+
     // --- why this matched -------------------------------------------------------
 
     @Test

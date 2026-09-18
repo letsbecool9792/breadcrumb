@@ -10,6 +10,7 @@ import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryDao
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.OriginalStore
+import com.lbc.breadcrumb.data.SyncState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -57,15 +58,52 @@ class OcrQueueTest {
         sandbox.deleteRecursively()
     }
 
-    private fun queue(batchSize: Int = 10, read: suspend (File) -> String) =
-        OcrQueue(dao, store, OcrReader { file -> reads += file.nameWithoutExtension; read(file) }, batchSize)
+    /** PDFs the fake document reader was asked to read, in order. */
+    private val pdfReads = mutableListOf<String>()
+
+    private fun queue(
+        batchSize: Int = 10,
+        readPdf: suspend (File) -> String = { "" },
+        read: suspend (File) -> String,
+    ) = OcrQueue(
+        dao,
+        store,
+        OcrReader { file -> reads += file.nameWithoutExtension; read(file) },
+        batchSize,
+        documents = OcrReader { file -> pdfReads += file.nameWithoutExtension; readPdf(file) },
+    )
 
     /** An image memory with a real stored file behind it. */
-    private suspend fun image(id: String, capturedAt: Long = 1_000): Memory {
-        val source = File(sandbox, "$id-source.png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
-        val stored = store.copyIn(Uri.fromFile(source), id, "png")
-        return Memory(id = id, type = MemoryType.IMAGE, capturedAt = capturedAt, localUri = store.uriFor(stored))
+    private suspend fun image(id: String, capturedAt: Long = 1_000): Memory = stored(id, MemoryType.IMAGE, "png", capturedAt)
+
+    private suspend fun stored(id: String, type: MemoryType, extension: String, capturedAt: Long = 1_000): Memory {
+        val source = File(sandbox, "$id-source.$extension").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val stored = store.copyIn(Uri.fromFile(source), id, extension)
+        return Memory(id = id, type = type, capturedAt = capturedAt, localUri = store.uriFor(stored))
             .also { dao.upsert(it) }
+    }
+
+    @Test
+    fun drain_readsAPdfWithTheDocumentReader() = runBlocking {
+        stored("notes", MemoryType.PDF, "pdf")
+        image("shot")
+
+        queue(readPdf = { "Data Structures, week 6" }) { "Qualcomm SWE Internship" }.drain()
+
+        // each kind to its own reader, never the other's
+        assertEquals(listOf("notes"), pdfReads)
+        assertEquals(listOf("shot"), reads)
+        assertEquals("Data Structures, week 6", dao.getById("notes")!!.extractedText)
+    }
+
+    @Test
+    fun drain_sendsAPdfAlreadySyncedAgainOnceItsTextIsRead() = runBlocking {
+        // saved before PDFs were read: on the server under its filename alone
+        dao.upsert(stored("old-notes", MemoryType.PDF, "pdf").copy(syncState = SyncState.SYNCED))
+
+        queue(readPdf = { "Data Structures, week 6" }) { "" }.drain()
+
+        assertEquals(SyncState.PENDING, dao.getById("old-notes")!!.syncState)
     }
 
     @Test
@@ -89,15 +127,15 @@ class OcrQueueTest {
     }
 
     @Test
-    fun drain_leavesEverythingButImagesAlone() = runBlocking {
+    fun drain_leavesEverythingButImagesAndPdfsAlone() = runBlocking {
         dao.upsert(Memory(id = "t", type = MemoryType.TEXT, rawText = "hello"))
         dao.upsert(Memory(id = "l", type = MemoryType.LINK, rawText = "https://example.com"))
-        dao.upsert(Memory(id = "p", type = MemoryType.PDF, localUri = "file:///nowhere.pdf"))
 
         queue { "text" }.drain()
 
         assertTrue(reads.isEmpty())
-        listOf("t", "l", "p").forEach { assertNull(dao.getById(it)!!.extractedText) }
+        assertTrue(pdfReads.isEmpty())
+        listOf("t", "l").forEach { assertNull(dao.getById(it)!!.extractedText) }
     }
 
     @Test

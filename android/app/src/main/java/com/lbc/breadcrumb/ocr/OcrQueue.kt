@@ -3,22 +3,25 @@ package com.lbc.breadcrumb.ocr
 import android.util.Log
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryDao
+import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.OriginalStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.conflate
 
 /**
- * Reads the text out of saved images on the device (architecture rule 4), so a
- * screenshot is searchable by what it says without any backend.
+ * Reads the text out of saved images and PDFs on the device (architecture
+ * rule 4), so a screenshot is searchable by what it says, and a PDF by more
+ * than its filename, without any backend.
  *
- * Nothing has to ask for it. The queue watches for image memories that have
- * not been read yet and works through them, newest first, whatever saved the
- * row -- a share, the clipboard tile, a later import. Capture never waits on it
- * (rule 2): "Saved" comes first, and the text follows a moment later.
+ * Nothing has to ask for it. The queue watches for image and PDF memories
+ * that have not been read yet and works through them, newest first, whatever
+ * saved the row -- a share, the clipboard tile, the app's own sheet, a later
+ * import. Capture never waits on it (rule 2): "Saved" comes first, and the
+ * text follows a moment later.
  *
  * The same watch is the recovery path. A read cut short when the process dies
  * leaves its row unread, and the next start picks it up -- as it does images
- * saved before OCR existed.
+ * saved before OCR existed, and PDFs saved before they were read.
  */
 class OcrQueue(
     private val dao: MemoryDao,
@@ -33,6 +36,8 @@ class OcrQueue(
      * itself gets sent to be read (step 3.6).
      */
     private val onRead: () -> Unit = {},
+    /** Reads PDFs: their text layer, or OCR of their first pages ([PdfReader]). */
+    private val documents: OcrReader = OcrReader { "" },
 ) {
 
     /**
@@ -45,22 +50,23 @@ class OcrQueue(
 
     /** Runs for the life of the process. */
     suspend fun run() {
-        dao.observeUnreadImageCount()
+        dao.observeUnreadCount()
             // a burst of saves while a drain runs becomes one more drain, not many
             .conflate()
             .collect { unread -> if (unread > 0) drain() }
     }
 
-    /** Reads every unread image, then returns. */
+    /** Reads every unread image and PDF, then returns. */
     suspend fun drain() {
         try {
             while (true) {
-                val batch = dao.unreadImages(exclude = failed.toList(), limit = batchSize)
+                val batch = dao.unreadOriginals(exclude = failed.toList(), limit = batchSize)
                 if (batch.isEmpty()) return
                 batch.forEach { read(it) }
             }
         } finally {
             reader.release()
+            documents.release()
         }
     }
 
@@ -72,7 +78,7 @@ class OcrQueue(
             ""
         } else {
             try {
-                reader.read(file)
+                if (memory.type == MemoryType.PDF) documents.read(file) else reader.read(file)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
