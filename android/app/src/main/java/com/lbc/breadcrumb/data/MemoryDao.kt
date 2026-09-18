@@ -77,14 +77,17 @@ interface MemoryDao {
      *   words arrive seconds later, and another when they do. Images older
      *   than the deadline go regardless, so a read that never finishes cannot
      *   strand a memory off the server.
+     * @param exclude ids held back for now -- memories whose capture sheet is
+     *   still open, where a note may yet be written.
      */
     @Query(
         "SELECT * FROM memories WHERE syncState = 'PENDING' " +
             "AND NOT (type = 'IMAGE' AND extractedText IS NULL AND localUri IS NOT NULL " +
             "AND capturedAt > :ocrDeadline) " +
+            "AND id NOT IN (:exclude) " +
             "ORDER BY capturedAt ASC LIMIT :limit"
     )
-    suspend fun pendingUploads(ocrDeadline: Long, limit: Int = 50): List<Memory>
+    suspend fun pendingUploads(ocrDeadline: Long, exclude: List<String> = emptyList(), limit: Int = 50): List<Memory>
 
     /**
      * UPLOADING means a request was in flight when the process died -- no
