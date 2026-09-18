@@ -135,6 +135,18 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun observe(id: String): Flow<Memory?> = dao.observeById(id)
 
     /**
+     * Writes the person's note on a memory, and sends it again so the server
+     * searches by the note too. On the app's scope: the sheet closing is one
+     * of the ways a note gets written, and must not cut the write short.
+     */
+    fun setNote(id: String, note: String?) {
+        val text = note?.trim()?.takeIf { it.isNotEmpty() }
+        appScope.launch {
+            if (dao.setNote(id, text, System.currentTimeMillis()) > 0) UploadWorker.schedule(getApplication())
+        }
+    }
+
+    /**
      * Deletes a memory at once, with a few seconds to take it back.
      *
      * The row goes now, with the delete remembered for the server, so it

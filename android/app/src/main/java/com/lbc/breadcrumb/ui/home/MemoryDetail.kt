@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,12 +27,25 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -94,6 +109,8 @@ internal fun ColumnScope.MemoryDetail(
     /** The sheet's own coming and going, which the picture travels within. */
     visibility: AnimatedVisibilityScope,
     onDelete: (Memory) -> Unit,
+    /** Writes the person's note; null or blank removes it. */
+    onNote: (String?) -> Unit,
 ) {
     val context = LocalContext.current
     val action = remember(memory) { Originals.actionFor(context, memory) }
@@ -122,6 +139,7 @@ internal fun ColumnScope.MemoryDetail(
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             Heading(memory, summary)
+            NoteSection(memory, onNote)
             Provenance(memory, now)
             FoundText(memory, readText)
         }
@@ -290,6 +308,95 @@ private fun Heading(memory: Memory, summary: String?) {
         }
         description?.let {
             Text(it, style = sans(15.sp, BoneDim, lineHeight = 22.sp))
+        }
+    }
+}
+
+/**
+ * The person's own words about it, beside an amber rule: theirs, not the
+ * model's. Tapped, it becomes a field; with none yet, a quiet "add a note".
+ * Only the note is editable here, never the memory itself -- this is not a
+ * notes app. A draft still open when the sheet closes is kept.
+ */
+@Composable
+private fun NoteSection(memory: Memory, onNote: (String?) -> Unit) {
+    var editing by remember(memory.id) { mutableStateOf(false) }
+    var draft by remember(memory.id) { mutableStateOf(memory.note.orEmpty()) }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    fun done() {
+        if (draft.trim() != memory.note.orEmpty()) onNote(draft)
+        editing = false
+        keyboard?.hide()
+    }
+
+    // closed mid-edit -- Back, a swipe, a tap above -- the draft is still what they meant
+    val closing by rememberUpdatedState(if (editing && draft.trim() != memory.note.orEmpty()) draft else null)
+    val write by rememberUpdatedState(onNote)
+    DisposableEffect(memory.id) {
+        onDispose { closing?.let(write) }
+    }
+
+    val label = monoStyle(10.sp, InkLabel).copy(letterSpacing = 1.2.sp)
+    when {
+        editing -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(stringResource(R.string.detail_note).uppercase(), style = label)
+            val focus = remember { FocusRequester() }
+            LaunchedEffect(Unit) { focus.requestFocus() }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(InkElevated)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                if (draft.isEmpty()) {
+                    Text(stringResource(R.string.capture_note_hint), style = sans(16.sp, InkOutline, lineHeight = 22.sp))
+                }
+                BasicTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    textStyle = sans(16.sp, lineHeight = 22.sp),
+                    cursorBrush = SolidColor(AmberBright),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                )
+            }
+            Text(
+                text = stringResource(R.string.detail_note_done),
+                style = sans(14.sp, AmberBright, FontWeight.SemiBold),
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(onClick = ::done)
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            )
+        }
+
+        memory.note != null -> Column(
+            Modifier.clip(RoundedCornerShape(8.dp)).clickable { editing = true },
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(stringResource(R.string.detail_note).uppercase(), style = label)
+                Text(stringResource(R.string.detail_note_edit), style = monoStyle(10.sp, AmberBright))
+            }
+            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.width(2.dp).fillMaxHeight().clip(CircleShape).background(AmberBright))
+                Text(memory.note, style = sans(16.sp, lineHeight = 23.sp))
+            }
+        }
+
+        else -> Row(
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { editing = true }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("+", style = monoStyle(14.sp, AmberBright))
+            Text(stringResource(R.string.capture_add_note), style = monoStyle(12.sp, BoneDim))
         }
     }
 }

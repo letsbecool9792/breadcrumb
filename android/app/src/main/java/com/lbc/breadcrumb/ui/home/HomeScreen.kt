@@ -136,6 +136,7 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
                         now = now,
                         visibility = visibility,
                         onDelete = viewModel::delete,
+                        onNote = { note -> viewModel.setNote(opened.memory.id, note) },
                     )
                 }
             }
