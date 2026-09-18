@@ -146,6 +146,7 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **Serif or sans is decided by where a title sits, never by the kind of memory.** Among others on the page — tiles, result rows, the capture sheet — a memory's title is `sans`; opened in its detail it is `serif`. The serif is otherwise only the app's voice (the wordmark, "Saved", empty states).
 - **The detail sheet is the app's own `SheetLayer`, not Material's `ModalBottomSheet`.** A shared-element transition — the picture travelling from its tile — only works within one composition, and Material's sheet lives in a window of its own. `SheetLayer` gives back what Material's gave: a height limit, a scrim that closes it, Back, and drag-to-dismiss handed off from the content's scroll through a nested-scroll connection.
 - **Animations that loop or follow a gesture run only while shown, and are read while drawing** (`graphicsLayer`, `drawBehind`, `Canvas`), not in composition: an infinite transition left running at rest redraws every frame, and reading one in composition recomposes every frame.
+- **Haptics follow the phone's Touch feedback setting.** They go through `performHapticFeedback`, which Android drops when that setting is off — it was off on the dev phone at first (`adb shell settings get system haptic_feedback_enabled` read 0). Felt nothing? Check that before the code.
 - **Upsert with `@Upsert`, never `@Insert(onConflict = REPLACE)`.** `memories_fts` is an external-content index kept in step by triggers, and REPLACE deletes the old row without firing delete triggers — the old text would stay searchable. `MemorySearchTest` covers it.
 - **Search input always goes through `FtsQuery.matchExpression`**, never straight into MATCH: raw input containing `"`, `-`, `OR` or `column:` is a syntax error or means something else. FTS4 (Room supports no FTS5) has no ranking function, so local results are newest first.
 - **An AutoMigration that adds or changes the FTS table does not index existing rows.** Room recreates the sync triggers after migrating, but the triggers only see later writes. v3 → v4 rebuilds the index in its spec (`BuildSearchIndex`); any future change to the FTS columns needs the same.
@@ -510,7 +511,7 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
         open original / open link / copy text
       · verified on device: screenshot → gallery, PDF → PDF viewer, link → browser, note copied
       · built and tested together with 4.2 at the user's request, committed apart
-- [~] **4.6** Search screens, second pass — from trying 4.2 and 4.5 on the phone
+- [x] **4.6** Search screens, second pass — from trying 4.2 and 4.5 on the phone
       · **done:** the detail sheet stops at 84% of the window, so the mosaic it came from
         stays in sight; its picture is cropped at 42%
       · **done:** a memory opened from the mosaic shows what a search shows. The server's
@@ -524,9 +525,8 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
         `ServerClientTest` (both calls); on-device `MemoryDaoTest` (delete, restore, clear,
         a copied summary found by local search) and `MemoryUploaderTest` (deletes sent once,
         kept when unconfirmed, never sent when undone; readings copied, asked once per send)
-      · **built, awaiting the user's check on the phone — the design pass**, agreed
-        2026-09-18, on the `design-pass` branch, one commit per piece; the user merges it
-        once verified. Built as agreed:
+      · **the design pass**, agreed 2026-09-18, built on the `design-pass` branch one commit
+        per piece, and merged by the user once verified on the phone:
         - three faces bundled (`res/font`, OFL licences in `assets/licenses`): Young Serif
           for the serif, Instrument Sans, IBM Plex Mono for chrome; Material's type scale set
           in them too. The serif is the user's pick: Instrument Serif was dropped as too thin
@@ -548,6 +548,8 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
           dismiss point
       · *test:* `./gradlew testDebugUnitTest` — `MastheadTest`, `CrumbTrailTest`,
         `MosaicEntrancesTest`; the motion itself is checked on the phone
+      · verified on device: faces, masthead, tiles, the walking crumb and the breathing
+        light, results and mosaic motion, the travelling picture, and all four haptics
 
 ### Phase 5 — Seeding
 
