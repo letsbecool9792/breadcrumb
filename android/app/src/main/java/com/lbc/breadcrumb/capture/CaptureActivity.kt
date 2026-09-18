@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.StringRes
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.Lifecycle
 import com.lbc.breadcrumb.BreadcrumbApp
 import com.lbc.breadcrumb.data.BreadcrumbDatabase
 import com.lbc.breadcrumb.data.Memory
@@ -126,6 +127,9 @@ abstract class CaptureActivity : ComponentActivity() {
         // the queue passes these over until [release].
         held = memories.map { it.id }
         app.uploadHolds += held
+        // Saved after the person had already gone elsewhere -- Home pressed
+        // mid-copy: no sheet is being looked at, so nothing to wait for.
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) release()
     }
 
     /**
@@ -160,6 +164,12 @@ abstract class CaptureActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         release()
+    }
+
+    /** However it ends, nothing stays held. */
+    override fun onDestroy() {
+        release()
+        super.onDestroy()
     }
 
     protected fun showFailed(@StringRes message: Int) {
