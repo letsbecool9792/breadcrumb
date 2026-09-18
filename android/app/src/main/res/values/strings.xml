@@ -16,6 +16,9 @@
     <string name="capture_add_note">add a note</string>
     <string name="capture_note_hint">who sent it, what it\'s for…</string>
 
+    <string name="shortcut_keep_short">Keep</string>
+    <string name="shortcut_keep_long">Keep something</string>
+
     <string name="tile_label">Breadcrumb</string>
     <string name="tile_subtitle">Save clipboard</string>
     <string name="capture_clipboard_empty">Clipboard is empty</string>

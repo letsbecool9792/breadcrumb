@@ -163,6 +163,17 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         writing = true
     }
 
+    /** The last outside ask to open the sheet that was answered: the screen coming back must not ask again. */
+    private var keepRequestsTaken = 0
+
+    /** An ask from outside the screen -- the launcher shortcut -- counted by the activity. */
+    fun onKeepRequest(count: Int) {
+        if (count <= keepRequestsTaken) return
+        keepRequestsTaken = count
+        opened = null
+        startWriting()
+    }
+
     /** Closes the sheet and keeps the draft. */
     fun stopWriting() {
         writing = false
