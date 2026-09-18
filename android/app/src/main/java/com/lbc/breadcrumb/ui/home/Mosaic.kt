@@ -49,6 +49,9 @@ import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.ui.common.DocumentGlyph
 import com.lbc.breadcrumb.ui.common.rememberThumbnail
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import com.lbc.breadcrumb.ui.theme.AmberBright
 import com.lbc.breadcrumb.ui.theme.AmberContainerDark
 import com.lbc.breadcrumb.ui.theme.Bone
 import com.lbc.breadcrumb.ui.theme.BoneDim
@@ -135,21 +138,44 @@ private fun Tile(memory: Memory, now: Long, onClick: () -> Unit) {
     }
 }
 
-/** A screenshot or photo, following its own shape within limits, cropped from the top. */
+/**
+ * A screenshot or photo, following its own shape within limits and cropped
+ * from the top -- a screenshot is recognised by its app bar and headline. Its
+ * words sit on the picture itself, over a shade that deepens toward the foot,
+ * so the tile is all picture.
+ */
 @Composable
 private fun PictureTile(memory: Memory, now: Long) {
     val picture = rememberThumbnail(memory, targetPx = 360)
+    // a caption or title when it came with one; otherwise the model's line about it, once copied back
+    val caption = ResultText.firstLine(memory.title ?: memory.rawText) ?: memory.summary
+
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        // a screenshot is recognised by its top -- the app bar, the headline
-        val height = picture?.let { (maxWidth * (it.height.toFloat() / it.width)).coerceIn(110.dp, 240.dp) } ?: 170.dp
+        val height = picture?.let { (maxWidth * (it.height.toFloat() / it.width)).coerceIn(150.dp, 270.dp) } ?: 190.dp
         Box(Modifier.fillMaxWidth().height(height).background(InkMedia)) {
             picture?.let {
                 Image(it, null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
             }
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Ink.copy(alpha = 0.6f), Ink.copy(alpha = 0.94f))))
+                    .padding(start = 11.dp, end = 11.dp, top = 30.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                caption?.let {
+                    Text(
+                        text = it,
+                        style = sans(13.sp, Bone, FontWeight.Medium, lineHeight = 17.sp),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(ResultText.tileMeta(memory, now), style = metaStyle.copy(color = BoneDim))
+            }
         }
     }
-    // a caption or title when it came with one; otherwise the model's line about it, once copied back
-    Caption(ResultText.firstLine(memory.title ?: memory.rawText) ?: memory.summary, ResultText.tileMeta(memory, now))
 }
 
 /** A PDF's first page, standing on its lower edge like a sheet in a tray. */
@@ -178,12 +204,19 @@ private fun DocumentTile(memory: Memory, now: Long) {
     Caption(memory.title ?: stringResource(R.string.capture_document), ResultText.tileMeta(memory, now))
 }
 
+/** A link: the site it leads to, its title in the serif, and when and where. */
 @Composable
 private fun LinkTile(memory: Memory, now: Long) {
     Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
         ResultText.host(memory)?.let { host ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Box(Modifier.size(14.dp).clip(RoundedCornerShape(3.dp)).background(AmberContainerDark))
+                // the site's initial on a small amber square, standing in for its icon
+                Box(
+                    Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)).background(AmberContainerDark),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(host.take(1).uppercase(), style = monoStyle(9.sp, AmberBright).copy(fontWeight = FontWeight.Medium))
+                }
                 Text(host, style = monoStyle(10.sp, BoneDim), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -197,17 +230,25 @@ private fun LinkTile(memory: Memory, now: Long) {
     }
 }
 
-/** The note is the whole tile. */
+/**
+ * The note is the whole tile, set as a pull-quote: the serif in italic,
+ * under an amber opening mark. What someone jotted down reads as something
+ * said, not as a form field.
+ */
 @Composable
 private fun NoteTile(memory: Memory, now: Long) {
-    Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+    Column(
+        Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 13.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("“", style = serif(40.sp, AmberBright, lineHeight = 30.sp))
         Text(
             text = memory.rawText?.trim().orEmpty().ifEmpty { ResultText.title(memory) },
-            style = sans(14.sp, lineHeight = 20.sp),
-            maxLines = 8,
+            style = serif(19.sp, lineHeight = 22.sp, italic = true),
+            maxLines = 7,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(ResultText.tileMeta(memory, now), style = metaStyle)
+        Text(ResultText.tileMeta(memory, now), style = metaStyle, modifier = Modifier.padding(top = 3.dp))
     }
 }
 
