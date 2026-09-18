@@ -5,6 +5,7 @@ import type { Embedder } from "./embeddings.ts";
 import type { Extractor, ImageExtractor } from "./gemini.ts";
 import { ingestImages, parseImages } from "./images.ts";
 import { type IncomingMemory, ingest, parseMemory } from "./ingest.ts";
+import { parseSearch, searchMemories } from "./search.ts";
 
 /** One request's worth of memories. The phone sends ten; this is the ceiling. */
 const MAX_BATCH = 50;
@@ -17,7 +18,7 @@ export interface AppOptions {
   log?: boolean;
   /** The Gemini pass. Injected so tests can run the endpoint without a model. */
   extract: Extractor;
-  /** Turns a memory into a vector. Injected for the same reason. */
+  /** Turns a memory, or a search phrase, into a vector. Injected for the same reason. */
   embed: Embedder;
   /** The Gemini pass over saved pictures (step 3.6). */
   extractImages: ImageExtractor;
@@ -27,7 +28,7 @@ export interface AppOptions {
 
 /**
  * The HTTP surface, built without listening so tests can serve it on any
- * port. Stays thin: health, ingest, and search at 4.1.
+ * port. Stays thin: health, ingest and search.
  */
 export function createApp({ log = true, extract, embed, extractImages, database }: AppOptions) {
   const app = express();
@@ -97,6 +98,29 @@ export function createApp({ log = true, extract, embed, extractImages, database 
     res.status(status).json({ results });
   });
 
+  // A ranked list of memories, never an answer: each result is a way back to
+  // the original on the phone. GET, so curl can ask it directly.
+  app.get("/search", async (req, res) => {
+    const parsed = parseSearch(req.query as Record<string, unknown>);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+
+    const outcome = await searchMemories(database ?? db(), embed, parsed.request);
+    if (!outcome.ok) {
+      // 503 when asking again shortly may work; 502 when the model refused
+      // outright. Either way the embedding model failed, not this server.
+      res.status(outcome.retryable ? 503 : 502).json({
+        error: "could not read the search",
+        reason: outcome.reason,
+        ...(outcome.retryable ? { retryable: true } : {}),
+      });
+      return;
+    }
+    res.json({ query: parsed.request.query, results: outcome.results });
+  });
+
   // JSON, never Express's HTML pages: the only client parses JSON.
   app.use((_req: Request, res: Response) => {
     res.status(404).json({ error: "not found" });
@@ -109,11 +133,15 @@ export function createApp({ log = true, extract, embed, extractImages, database 
   return app;
 }
 
+/**
+ * The path only, never the query string: a search's `q` is what someone was
+ * looking for, and it does not belong in a log.
+ */
 function logRequest(req: Request, res: Response, next: NextFunction) {
   const started = performance.now();
   res.on("finish", () => {
     const ms = Math.round(performance.now() - started);
-    console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${ms}ms`);
+    console.log(`${req.method} ${req.path} ${res.statusCode} ${ms}ms`);
   });
   next();
 }

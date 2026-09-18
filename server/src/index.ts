@@ -33,7 +33,9 @@ try {
         JSON.stringify(vectorIndexDefinition(EMBEDDING_DIMENSIONS), null, 2),
     );
   } else {
-    console.log(`vector index "${VECTOR_INDEX}" ${index}`);
+    // a new index takes about half a minute on M0, and until then every search
+    // comes back empty rather than failing
+    console.log(`vector index "${VECTOR_INDEX}" ${index}${index === "created" ? ", searchable in about 30s" : ""}`);
   }
 } catch (error) {
   console.error(`could not reach MongoDB: ${describeMongoError(error)}`);
