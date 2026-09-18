@@ -67,6 +67,7 @@ So ingest runs on **Flash Lite**, and everything is built to spend requests, not
 - **Batch.** One call reads ten memories; embeddings take an array too. 500 seed items is ~50 requests.
 - **Never pay twice.** Fingerprints of what the model read mean a retry or a re-send costs nothing.
 - **Ask only when there is something new to read.** An image waits for OCR; a memory with no text is stored without a model call at all.
+- **Send a picture only when OCR could not read it** (under 80 characters). Images cost ~1,000 prompt tokens each even when tiny, roughly ten times the text beside them, so a text-heavy screenshot is left to its words. Pictures go downscaled, four to a request, once each.
 
 Gemma's 14,400/day is the escape hatch if 500 ever binds, though it likely has no structured output. Check current limits at `aistudio.google.com/rate-limit` with "All models" on.
 
@@ -186,6 +187,8 @@ npm run typecheck
 - **A vector index's filter fields must be declared up front.** `memories_vector` declares `type`, `hasLink`, `capturedAt` and `sourceAppLabel` for 4.3; adding another later means rebuilding the index. M0 allows three search indexes, and the text index at 4.4 is the second.
 - **`FAILED` means the server refused a memory**, and is not retried automatically: the same bytes would be refused again. Transient failures go back to `PENDING` instead, and the debug Sync button queues refused ones again.
 - **A model call that may succeed later must answer 503, never 200.** A 200 marks the memory synced on the phone, and nothing re-enriches it afterwards — the phone re-sending it *is* the re-enrichment path.
+- **Pictures reach the server as base64 JSON and are never written anywhere**, not even a temp file (rule 1). `/memories/images` only reads pictures for memories it already holds; the phone sends memories first and pictures after, in the same worker run.
+- **OCR must ask for an upload pass after *every* read, including one that found nothing.** Images are held back until OCR has looked at them, and an empty read is the very case whose picture gets sent — skip the signal and those photos wait for the next save or launch.
 - **Live model tests skip themselves when Gemini is overloaded** (503/429 after retries). A third party's capacity is not something to fail a build over — but a skip is not a pass, so read the run's skip lines.
 
 ### Editors
@@ -380,9 +383,8 @@ Do not start the next step until the current one is ticked. Do not batch several
         than two unrelated ones** (by >0.1); plus what gets embedded, and the index definition
       · verified: `vector index "memories_vector" exists` at startup, and a posted link came
         back `enriched: True, embedded: True` with its vector in Atlas
-      · **ingest takes ~13s per memory** (Flash, then the embedding). Invisible behind the
-        queue at 3.5, but 5.1 imports hundreds of items — batch or parallelise there, and
-        consider `thinkingBudget: 0` for the extraction call
+      · **ingest took ~13s per memory** on 3.8 Flash. Resolved at 3.5: Flash Lite answers in
+        ~1.4s per *batch*. (`thinkingBudget: 0` was tried — Flash Lite refuses `thinkingConfig`.)
       · **open:** `gemini-embedding-2` is now stable and multimodal, which is what Post-V1
         wanted for screenshots with little text. Staying on `gemini-embedding-001` for V1.
 - [x] **3.5** WorkManager upload queue with retry
@@ -396,8 +398,19 @@ Do not start the next step until the current one is ticked. Do not batch several
       · *test:* save in airplane mode → reconnect → syncs without duplicating
       · verified on device with the server running: the queue drained on launch, a save in
         airplane mode stayed unsent, and reconnecting drained it with nothing duplicated
-- [ ] **3.6** Image ingest — upload for processing, discard server-side after
+- [x] **3.6** Image ingest — upload for processing, discard server-side after
+      · *test:* `npm test` in `server/` — pictures stored nowhere, one model call per batch, the
+        same picture never read twice, an unknown memory refused, 503 on a rate limit; plus a
+        live read of a hand-encoded PNG proving Flash Lite takes images
+      · *test:* `./gradlew testDebugUnitTest` — `ImageRulesTest` (the downscale arithmetic)
+      · *test:* on-device `ImageForUploadTest` (3000×2000 PNG leaves as 1500×1000 JPEG) and
+        `MemoryUploaderTest`: only images OCR could barely read, once each, after their memory
+        is on the server, four to a request
       · *test:* share a screenshot → entities returned, original still only on device
+      · verified on device: a photo with no text came back with `readText`, entities and an
+        embedding, and no image data or `localUri` in Atlas; a text-heavy screenshot sent no
+        picture; nothing was sent twice
+      · schema v5 (`imageSentAt`) verified by installing over the real v4 database
 
 ### Phase 4 — Retrieval
 
