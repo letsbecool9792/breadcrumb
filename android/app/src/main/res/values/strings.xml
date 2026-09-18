@@ -41,6 +41,7 @@
     <string name="detail_from">from</string>
     <string name="detail_taken">taken</string>
     <string name="detail_text_found">text found</string>
+    <string name="detail_from_page">from the page</string>
     <string name="detail_seen">what it shows</string>
     <string name="detail_copied">Copied</string>
     <string name="detail_no_app">No app here can open this</string>

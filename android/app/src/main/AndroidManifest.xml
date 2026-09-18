@@ -2,8 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- The backend. Capture never waits on it (architecture rule 2). -->
+    <!-- The backend, and saved links' pages. Capture never waits on either
+         (architecture rule 2). -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Whether the phone is online, so a link whose page cannot be reached
+         is told apart from a phone that has lost its network. WorkManager
+         declares it too; declared here because the app reads it itself. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Makes launchable apps visible, so a capture can record its source
          app's name. Without this, Android 11+ hides most packages: WhatsApp
