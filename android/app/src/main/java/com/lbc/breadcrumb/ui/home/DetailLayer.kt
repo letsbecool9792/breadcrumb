@@ -29,7 +29,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +82,9 @@ private val Settle = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 private const val OPEN_MS = 420
 private const val CLOSE_MS = 300
+
+/** How far down, as a share of its height, a sheet must be pulled for letting go to dismiss it. */
+private const val DISMISS_AT = 0.22f
 
 /**
  * A memory's picture where it sits in a tile or a result row. While that
@@ -148,8 +157,17 @@ internal fun <T : Any> SheetLayer(
 
         BackHandler(onBack = onDismiss)
 
+        // a tap under the thumb as a pull crosses the point where letting go dismisses
+        val haptics = LocalHapticFeedback.current
+        LaunchedEffect(Unit) {
+            snapshotFlow { drag > sheetHeight * DISMISS_AT }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { past -> if (past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
+        }
+
         fun release(velocity: Float) {
-            if (drag > sheetHeight * 0.22f || velocity > 1_600f) {
+            if (drag > sheetHeight * DISMISS_AT || velocity > 1_600f) {
                 onDismiss()
             } else {
                 scope.launch { animate(drag, 0f, animationSpec = spring(stiffness = 500f)) { value, _ -> drag = value } }
