@@ -145,7 +145,8 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **Upsert with `@Upsert`, never `@Insert(onConflict = REPLACE)`.** `memories_fts` is an external-content index kept in step by triggers, and REPLACE deletes the old row without firing delete triggers — the old text would stay searchable. `MemorySearchTest` covers it.
 - **Search input always goes through `FtsQuery.matchExpression`**, never straight into MATCH: raw input containing `"`, `-`, `OR` or `column:` is a syntax error or means something else. FTS4 (Room supports no FTS5) has no ranking function, so local results are newest first.
 - **An AutoMigration that adds or changes the FTS table does not index existing rows.** Room recreates the sync triggers after migrating, but the triggers only see later writes. v3 → v4 rebuilds the index in its spec (`BuildSearchIndex`); any future change to the FTS columns needs the same.
-- **Back up the phone's database before installing a schema bump.** `adb exec-out run-as com.lbc.breadcrumb cat databases/breadcrumb.db > breadcrumb.db`, and the same for `-wal` and `-shm` — the WAL holds recent writes. A failed migration rolls back rather than wiping, but real saved memories are not worth the bet.
+- **Back up the phone's database before installing a schema bump.** `adb exec-out run-as com.lbc.breadcrumb cat databases/breadcrumb.db > breadcrumb.db`, and the same for `-wal` and `-shm` — the WAL holds recent writes. A failed migration rolls back rather than wiping, but real saved memories are not worth the bet. Run it from Git Bash: PowerShell 5.1's `>` re-encodes binary output and corrupts the copy.
+- **Running the instrumented tests migrates the real database.** The test APK runs in the app's process, and `BreadcrumbApp.onCreate` opens the real database for the OCR queue — so installing a schema bump and running `am instrument` performs the migration, before the app is ever opened. Back up first.
 - **Cleartext HTTP is blocked by default** since Android 9. Local dev against `adb reverse` needs a network security config permitting cleartext to `localhost` — scoped to the **debug** build type only, never release.
 - Android Studio should open **`android/`** as the project root, not the repo root. Opening the repo root confuses Gradle sync.
 - **compileSdk is 36.1 and only android-30/34/35/36/36.1 are installed.** Some libraries now require compileSdk 37 (lifecycle 2.11.0 does, 2.10.0 does not; OkHttp 5.5.0 does, 5.4.0 does not — read `minCompileSdk` from the AAR's `aar-metadata.properties` to check). Prefer pinning the library back over pulling down another SDK platform unless the newer version is actually needed — disk on this machine is tight.
@@ -190,6 +191,8 @@ npm run typecheck
 - **Documents and search phrases are embedded under different task types** (`RETRIEVAL_DOCUMENT`, `RETRIEVAL_QUERY`). Using one for both quietly costs retrieval quality.
 - **A vector index's filter fields must be declared up front.** `memories_vector` declares `type`, `hasLink`, `capturedAt` and `sourceAppLabel` for 4.3; adding another later means rebuilding the index. `memories_text` declares the same four. **Startup never updates an existing index**, only creates a missing one: a changed definition is applied deliberately (`updateSearchIndex` or the Atlas UI), since every update rebuilds.
 - **`FAILED` means the server refused a memory**, and is not retried automatically: the same bytes would be refused again. Transient failures go back to `PENDING` instead, and the debug Sync button queues refused ones again.
+- **Every delete goes through `MemoryDao.deleteEverywhere`**, never `delete` alone: it removes the row and records a `pending_deletes` entry in one transaction, and the upload queue sends those first. A delete that stays on the phone leaves the memory's text and vector in Atlas. The debug list's **Clear** deletes everything on the server too.
+- **`Memory.enrichedAt` null means "ask the server"** for its reading. `markSynced` and `markImageSent` clear it — every send may have been read again — and the queue's last step copies summary, kind and readText back. Every id asked about is marked, answer or not, so the pass cannot loop.
 - **A model call that may succeed later must answer 503, never 200.** A 200 marks the memory synced on the phone, and nothing re-enriches it afterwards — the phone re-sending it *is* the re-enrichment path.
 - **Pictures reach the server as base64 JSON and are never written anywhere**, not even a temp file (rule 1). `/memories/images` only reads pictures for memories it already holds; the phone sends memories first and pictures after, in the same worker run.
 - **OCR must ask for an upload pass after *every* read, including one that found nothing.** Images are held back until OCR has looked at them, and an empty read is the very case whose picture gets sent — skip the signal and those photos wait for the next save or launch.
@@ -477,8 +480,9 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
       · tested by the user with curl against the real collection
 - [x] **4.2** Real search UI, replacing the debug list
       · *test:* type a query on device, see ranked results
-      · **deletes do not sync**, so the server holds memories the phone has deleted (16 there
-        against 6 on the phone, 2026-09-18). Drop result ids the phone does not hold
+      · deletes did not sync then, so the server held memories the phone had deleted (16 there
+        against 6 on the phone, 2026-09-18); results drop ids the phone does not hold. Deletes
+        sync since 4.6, but the join stays — memories deleted before that are still there
       · *test:* `./gradlew testDebugUnitTest` — `ResultTextTest` (fragments, titles, ages, the
         counter), `SearchJoinTest` (server order kept, deleted ids dropped), `ServerClientTest`
         (the search contract); on-device `MemoryDaoTest` (`getByIds`, `searchOnce`)
@@ -501,13 +505,25 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
       · verified on device: screenshot → gallery, PDF → PDF viewer, link → browser, note copied
       · built and tested together with 4.2 at the user's request, committed apart
 - [~] **4.6** Search screens, second pass — from trying 4.2 and 4.5 on the phone
-      · the detail sheet has a height limit: a tall screenshot opened it full screen,
-        hiding the mosaic it came from
-      · a memory opened from the mosaic shows what a search shows — the model's summary and
-        what it saw — so the enrichment has to live on the phone, not only on the server
-      · delete from the detail, and the delete reaching the server
-      · a design pass: typography (serif titles are the user's suggestion), motion, the
-        landing screen — ideas first, then built
+      · **done:** the detail sheet stops at 84% of the window, so the mosaic it came from
+        stays in sight; its picture is cropped at 42%
+      · **done:** a memory opened from the mosaic shows what a search shows. The server's
+        reading (summary, kind, what it saw) is copied back into Room by the upload queue
+        (`POST /memories/enrichment`), so it also captions picture tiles and is found by local
+        word search offline. Schema v6, verified by installing over the real v5 database
+      · **done:** delete from the detail, with five seconds of Undo in place of a confirmation;
+        the delete reaches the server (`POST /memories/delete`) through a `pending_deletes`
+        queue in Room, as do the capture sheet's Undo and the debug list's delete and Clear
+      · *test:* `npm test` in `server/` — `sync.test.ts`; `./gradlew testDebugUnitTest` —
+        `ServerClientTest` (both calls); on-device `MemoryDaoTest` (delete, restore, clear,
+        a copied summary found by local search) and `MemoryUploaderTest` (deletes sent once,
+        kept when unconfirmed, never sent when undone; readings copied, asked once per send)
+      · **in progress — the design pass**, agreed 2026-09-18: bundle the canvas's own faces
+        (Instrument Serif for titles, Instrument Sans for what was saved, IBM Plex Mono for
+        chrome); a large serif "breadcrumb" at the top that shrinks into the strip on scroll;
+        notes as serif pull-quotes; captions over picture tiles; a crumb-trail loader in the
+        search field; results gliding to their ranked places; the mosaic staggering in, saves
+        dropping in, deletes collapsing out; the tile expanding into its detail; haptics
 
 ### Phase 5 — Seeding
 
@@ -520,7 +536,7 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
 ## Also in V1, outside the numbered steps
 
 - **Auth: no user accounts.** One device, a long-lived token in the Android keystore, backend validates it. Google Sign-In is an afternoon's work whenever it is actually needed — do not spend V1 on user management for a one-user app.
-- Express stays thin: one ingest endpoint, one search endpoint.
+- Express stays thin: ingest (`/memories`, `/memories/images`), search (`/search`), and keeping the phone in step (`/memories/enrichment`, `/memories/delete`). Each is a few lines over a function that is tested on its own.
 - Search UI is search-bar-first. No dashboard, no feed, no folder tree.
 
 ## V1 explicitly excludes
