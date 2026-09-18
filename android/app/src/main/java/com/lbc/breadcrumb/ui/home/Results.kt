@@ -1,6 +1,17 @@
 package com.lbc.breadcrumb.ui.home
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,26 +82,72 @@ internal fun Results(state: SearchState.Searching, now: Long, onOpen: (Result) -
         return
     }
 
+    // Rows that have already arrived in this search do not arrive again --
+    // when the ranked answer replaces the word matches, or when one scrolls
+    // back into view. A new search starts afresh.
+    val arrived = remember(state.phrase) { mutableSetOf<String>() }
+
     LazyColumn(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 56.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
         itemsIndexed(state.results, key = { _, result -> result.memory.id }) { index, result ->
+            // read before this row is recorded as arrived, so its light does not replay either
+            val settled = remember { result.memory.id in arrived }
             ResultRow(
                 result = result,
                 words = words,
                 now = now,
+                settled = settled,
                 // the top hit sits on slightly lifted ground, once the ranking is real
                 lifted = index == 0 && state.status == SearchStatus.RANKED,
                 onClick = { onOpen(result) },
+                modifier = Modifier
+                    // a row the ranking moves glides to its new place, so the ranking is seen happening
+                    .animateItem(
+                        fadeInSpec = null,
+                        placementSpec = spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntOffset.VisibilityThreshold),
+                        fadeOutSpec = tween(140),
+                    )
+                    .arriving(result.memory.id, index, arrived),
             )
         }
     }
 }
 
+/**
+ * A row's first appearance in a search: it rises into place and fades in,
+ * a beat after the one above it, so a list reads top to bottom as it lands.
+ */
 @Composable
-private fun ResultRow(result: Result, words: List<String>, now: Long, lifted: Boolean, onClick: () -> Unit) {
+private fun Modifier.arriving(id: String, index: Int, arrived: MutableSet<String>): Modifier {
+    val progress = remember { Animatable(if (id in arrived) 1f else 0f) }
+    LaunchedEffect(id) {
+        if (id in arrived) return@LaunchedEffect
+        arrived += id
+        delay(ARRIVAL_STAGGER_MS * index.coerceAtMost(8))
+        progress.animateTo(1f, tween(340, easing = FastOutSlowInEasing))
+    }
+    return graphicsLayer {
+        alpha = progress.value
+        translationY = (1f - progress.value) * 16.dp.toPx()
+    }
+}
+
+private const val ARRIVAL_STAGGER_MS = 40L
+
+@Composable
+private fun ResultRow(
+    result: Result,
+    words: List<String>,
+    now: Long,
+    /** Already shown in this search: drawn as it ended, with nothing to play again. */
+    settled: Boolean,
+    lifted: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val memory = result.memory
     // the search's answer when there is one; the phone's copy while only local matches show
     val summary = result.hit?.summary ?: memory.summary
@@ -99,9 +156,16 @@ private fun ResultRow(result: Result, words: List<String>, now: Long, lifted: Bo
     val fragment = remember(memory, result.hit, words) {
         ResultText.fragment(listOf(memory.rawText, memory.extractedText, readText, memory.title, summary), words)
     }
+    // the matched word warms to amber a moment after its row lands
+    val glow = remember { Animatable(if (settled) 1f else 0f) }
+    LaunchedEffect(fragment) {
+        if (fragment == null || glow.value == 1f) return@LaunchedEffect
+        delay(180)
+        glow.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
+    }
 
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(if (lifted) InkElevated else Color.Transparent)
@@ -123,7 +187,7 @@ private fun ResultRow(result: Result, words: List<String>, now: Long, lifted: Bo
             // Why this matched: the words lit where they were found; for a
             // match by meaning alone, the model's one line about the thing.
             val because: AnnotatedString? = when {
-                fragment != null -> lit(fragment)
+                fragment != null -> lit(fragment, glow.value)
                 summary != null && summary != title -> AnnotatedString(summary)
                 else -> null
             }
@@ -141,10 +205,15 @@ private fun ResultRow(result: Result, words: List<String>, now: Long, lifted: Bo
     }
 }
 
-/** The fragment with its hit lit amber, as the design draws it. */
-private fun lit(fragment: Fragment): AnnotatedString = buildAnnotatedString {
+/**
+ * The fragment with its hit lit amber, as the design draws it. [glow] runs
+ * 0 to 1 as the light comes up: from the fragment's own colour, unlit, to amber.
+ */
+private fun lit(fragment: Fragment, glow: Float): AnnotatedString = buildAnnotatedString {
     append(fragment.before)
-    withStyle(SpanStyle(color = AmberBright, background = HitBackground)) { append(fragment.hit) }
+    withStyle(SpanStyle(color = lerp(BoneDim, AmberBright, glow), background = HitBackground.copy(alpha = glow))) {
+        append(fragment.hit)
+    }
     append(fragment.after)
 }
 

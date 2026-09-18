@@ -1,7 +1,10 @@
 package com.lbc.breadcrumb.ui.home
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -106,19 +109,37 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
             .statusBarsPadding(),
     ) {
         val total = memories?.size ?: 0
-        // at rest the mosaic carries its own masthead; a search has its counter
-        if (search is SearchState.Searching) Counter(search, total)
+        // here rather than in the mosaic, so a search and back returns to the same place in it
+        val grid = rememberLazyStaggeredGridState()
+        // the search being left stays drawn while it fades out
+        var lastSearch by remember { mutableStateOf<SearchState.Searching?>(null) }
+        if (search is SearchState.Searching) lastSearch = search
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (search) {
-                SearchState.Resting -> Mosaic(
-                    memories = memories,
-                    now = now,
-                    kept = ResultText.kept(total, unsent),
-                    onOpenDebug = onOpenDebug,
-                    onOpen = { viewModel.open(Result(it, hit = null)) },
-                )
-                is SearchState.Searching -> Results(search, now, onOpen = viewModel::open)
+            // browsing and searching hand over with a fade, rather than a cut
+            AnimatedContent(
+                targetState = search is SearchState.Searching,
+                transitionSpec = { fadeIn(tween(240, delayMillis = 60)) togetherWith fadeOut(tween(160)) },
+                label = "mode",
+            ) { searching ->
+                if (searching) {
+                    lastSearch?.let { shown ->
+                        // at rest the mosaic carries its own masthead; a search has its counter
+                        Column(Modifier.fillMaxSize()) {
+                            Counter(shown, total)
+                            Box(Modifier.weight(1f)) { Results(shown, now, onOpen = viewModel::open) }
+                        }
+                    }
+                } else {
+                    Mosaic(
+                        memories = memories,
+                        now = now,
+                        kept = ResultText.kept(total, unsent),
+                        grid = grid,
+                        onOpenDebug = onOpenDebug,
+                        onOpen = { viewModel.open(Result(it, hit = null)) },
+                    )
+                }
             }
             // content fades under the search field rather than stopping abruptly
             Box(
