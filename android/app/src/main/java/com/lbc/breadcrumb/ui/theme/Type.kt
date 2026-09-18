@@ -5,25 +5,43 @@ import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import com.lbc.breadcrumb.R
 
-// The design canvas's faces, bundled (res/font, licences in assets/licenses --
-// all three are OFL). One face per job, and the split is the point:
+// Three faces, bundled (res/font, licences in assets/licenses -- all OFL).
+// One face per job, and the split is the point:
 //
-//   Serif -- what a thing is called: titles, the wordmark, a note set as a quote.
-//   Sans  -- anything the user saved: captions, notes, the model's summaries.
+//   Serif -- the app's voice, and a memory once it is opened: the wordmark, a
+//            detail's title, a note read in full.
+//   Sans  -- everything on the page: tiles, result rows, captions, summaries.
 //   Mono  -- chrome: counts, dates, source apps, match fragments.
 //
-// Mono chrome around saved words is what reads as a tool rather than a notes
-// app; the serif gives the archive its voice.
+// A memory's title is sans wherever it sits among others and serif once it
+// is opened -- for every kind of memory, never by kind.
 
-/** Instrument Serif, the serif partner of the canvas's Instrument Sans. Regular and italic only. */
+/**
+ * Fraunces, a soft "wonky" old-style serif: regular weight, with a WONK axis
+ * that tilts a few letters for a hand-set, slightly off-kilter look. Chosen
+ * over Instrument Serif, which read too thin on the ink.
+ *
+ * One variable file. Every axis is set, since its defaults are not what a
+ * title wants -- the file's default weight is 900: weight 400, optical size
+ * 24 (the cut drawn for title sizes: sturdier than display, finer than
+ * text), SOFT 50 to round its corners a little, WONK on.
+ */
+@OptIn(ExperimentalTextApi::class)
 val Serif = FontFamily(
-    Font(R.font.instrument_serif, FontWeight.Normal),
-    Font(R.font.instrument_serif_italic, FontWeight.Normal, FontStyle.Italic),
+    Font(
+        R.font.fraunces,
+        FontWeight.Normal,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(400),
+            FontVariation.Setting("opsz", 24f),
+            FontVariation.Setting("SOFT", 50f),
+            FontVariation.Setting("WONK", 1f),
+        ),
+    ),
 )
 
 /**
