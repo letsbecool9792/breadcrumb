@@ -2,7 +2,15 @@ package com.lbc.breadcrumb.ui.home
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -33,6 +41,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -131,6 +140,7 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
             UndoBar(removed = viewModel.removed, onUndo = viewModel::undo)
             SearchField(
                 query = viewModel.query,
+                searching = (search as? SearchState.Searching)?.status == SearchStatus.RANKING,
                 onQueryChange = viewModel::onQueryChange,
                 onClear = viewModel::clear,
             )
@@ -203,9 +213,9 @@ private fun Counter(search: SearchState.Searching, total: Int) {
             typed = search.phrase,
             interpretation = search.interpretation,
             today = LocalDate.now(),
+            // a search in flight is shown by the trail walking in the field, not in words
             status = when (search.status) {
-                SearchStatus.RANKING -> "searching…"
-                SearchStatus.RANKED -> null
+                SearchStatus.RANKING, SearchStatus.RANKED -> null
                 SearchStatus.OFFLINE -> "offline · words only"
                 SearchStatus.UNAVAILABLE -> "search busy · words only"
             },
@@ -219,11 +229,15 @@ private fun Counter(search: SearchState.Searching, total: Int) {
 
 /**
  * Rests at the bottom, in the thumb; rides up on the keyboard while typing.
- * Its edge warms to amber while it has focus.
+ *
+ * A faint amber light pools behind it -- the one warm thing on the ink --
+ * brighter while it has focus, breathing while a search is out. Its crumb
+ * trail walks while the ranked answer is on its way.
  */
 @Composable
 private fun SearchField(
     query: String,
+    searching: Boolean,
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
@@ -233,8 +247,37 @@ private fun SearchField(
     val focused by interaction.collectIsFocusedAsState()
     val shape = RoundedCornerShape(27.dp)
 
+    val base by animateFloatAsState(if (focused || searching) 0.13f else 0.06f, tween(400), label = "glow")
+    // only while a search is out: an animation left running at rest redraws every frame for nothing
+    val breathing: State<Float>? = if (searching) {
+        rememberInfiniteTransition(label = "glow").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(1_400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "breath",
+        )
+    } else {
+        null
+    }
+
     Row(
         modifier
+            // before the clip, so the light spills past the pill's edge; read
+            // while drawing, so the light changing redraws without recomposing
+            .drawBehind {
+                val glow = base + 0.07f * (breathing?.value ?: 0f)
+                scale(scaleX = 1f, scaleY = 0.42f) {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            listOf(AmberBright.copy(alpha = glow), Color.Transparent),
+                            center = center,
+                            radius = size.width * 0.62f,
+                        ),
+                        radius = size.width * 0.62f,
+                        center = center,
+                    )
+                }
+            }
             .fillMaxWidth()
             .height(54.dp)
             .clip(shape)
@@ -244,7 +287,7 @@ private fun SearchField(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
-        CrumbTrail(Modifier.size(17.dp))
+        CrumbTrail(Modifier.size(17.dp), walking = searching)
 
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             if (query.isEmpty()) {
