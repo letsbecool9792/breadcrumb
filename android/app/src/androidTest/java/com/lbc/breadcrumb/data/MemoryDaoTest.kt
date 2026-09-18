@@ -221,6 +221,57 @@ class MemoryDaoTest {
     }
 
     @Test
+    fun aNoteIsFoundByLocalSearch() = runBlocking {
+        dao.upsert(Memory(id = "photo", type = MemoryType.IMAGE, extractedText = ""))
+
+        dao.setNote("photo", "the balcony at Priya's new flat", now = 5_000)
+
+        assertEquals(listOf("photo"), dao.searchOnce(FtsQuery.matchExpression("balcony")!!, 10).map { it.id })
+    }
+
+    @Test
+    fun writingANoteQueuesTheMemoryToSyncAgain() = runBlocking {
+        dao.upsertAll(
+            listOf(
+                Memory(id = "synced", type = MemoryType.LINK, syncState = SyncState.SYNCED),
+                Memory(id = "in-flight", type = MemoryType.LINK, syncState = SyncState.UPLOADING),
+            )
+        )
+
+        dao.setNote("synced", "for the Pune trip", now = 5_000)
+        dao.setNote("in-flight", "for the Pune trip", now = 5_000)
+
+        // the server searches by the note too, so it must hear it
+        assertEquals(SyncState.PENDING, dao.getById("synced")!!.syncState)
+        assertEquals(5_000L, dao.getById("synced")!!.updatedAt)
+        // the send in flight carries no note: it must not be marked synced
+        assertEquals(0, dao.markSynced("in-flight", "in-flight"))
+        assertEquals(SyncState.PENDING, dao.getById("in-flight")!!.syncState)
+    }
+
+    @Test
+    fun theSameNoteAgainChangesNothing() = runBlocking {
+        dao.upsert(Memory(id = "kept", type = MemoryType.TEXT, note = "for later", syncState = SyncState.SYNCED))
+
+        assertEquals(0, dao.setNote("kept", "for later", now = 5_000))
+        // clearing a note that was never written is no change either
+        dao.upsert(Memory(id = "plain", type = MemoryType.TEXT, syncState = SyncState.SYNCED))
+        assertEquals(0, dao.setNote("plain", null, now = 5_000))
+
+        assertEquals(SyncState.SYNCED, dao.getById("kept")!!.syncState)
+        assertEquals(SyncState.SYNCED, dao.getById("plain")!!.syncState)
+    }
+
+    @Test
+    fun removingANoteTakesItOutOfLocalSearch() = runBlocking {
+        dao.upsert(Memory(id = "photo", type = MemoryType.IMAGE, note = "balcony"))
+
+        dao.setNote("photo", null, now = 5_000)
+
+        assertTrue(dao.searchOnce(FtsQuery.matchExpression("balcony")!!, 10).isEmpty())
+    }
+
+    @Test
     fun searchableText_joinsPopulatedFieldsOnly() {
         val memory = Memory(
             type = MemoryType.IMAGE,

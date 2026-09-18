@@ -23,6 +23,7 @@ import androidx.room.FtsOptions
 @Entity(tableName = "memories_fts")
 data class MemoryFts(
     val title: String?,
+    val note: String?,
     val summary: String?,
     val rawText: String?,
     val extractedText: String?,

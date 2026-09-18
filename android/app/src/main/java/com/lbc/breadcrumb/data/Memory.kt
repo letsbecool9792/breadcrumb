@@ -73,6 +73,14 @@ data class Memory(
     /** Shared text, URL, or clipboard content. */
     val rawText: String? = null,
 
+    /**
+     * The person's own words about it -- written in the capture sheet, in the
+     * app's own sheet beside a picture or PDF, or later from the detail.
+     * Never required: saving stays one tap. Kept apart from [rawText], which
+     * is what was shared, so the two can be told apart and the note edited.
+     */
+    val note: String? = null,
+
     /** App-private copy of the original file, for image/pdf/audio. */
     val localUri: String? = null,
 
@@ -131,7 +139,7 @@ data class Memory(
      * now; it is also what gets embedded server-side later.
      */
     val searchableText: String
-        get() = listOfNotNull(title, summary, rawText, extractedText)
+        get() = listOfNotNull(title, note, summary, rawText, extractedText)
             .filter { it.isNotBlank() }
             .joinToString("\n")
 
