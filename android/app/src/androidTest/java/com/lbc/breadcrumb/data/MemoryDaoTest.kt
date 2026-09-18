@@ -140,6 +140,32 @@ class MemoryDaoTest {
     }
 
     @Test
+    fun getByIds_returnsOnlyWhatThePhoneHolds() = runBlocking {
+        dao.upsertAll(listOf(Memory(id = "a", type = MemoryType.TEXT), Memory(id = "b", type = MemoryType.LINK)))
+
+        // "gone": ranked by the server, deleted here -- deletes do not sync
+        val held = dao.getByIds(listOf("b", "gone", "a")).map { it.id }.toSet()
+
+        assertEquals(setOf("a", "b"), held)
+    }
+
+    @Test
+    fun searchOnce_isTheWordSearchNewestFirstAndCapped() = runBlocking {
+        dao.upsertAll(
+            listOf(
+                Memory(id = "old", type = MemoryType.TEXT, capturedAt = 1_000, rawText = "Qualcomm internship"),
+                Memory(id = "new", type = MemoryType.TEXT, capturedAt = 3_000, rawText = "Qualcomm referral"),
+                Memory(id = "mid", type = MemoryType.TEXT, capturedAt = 2_000, rawText = "Qualcomm offer"),
+                Memory(id = "other", type = MemoryType.TEXT, capturedAt = 4_000, rawText = "Naru's omakase"),
+            )
+        )
+
+        val found = dao.searchOnce(FtsQuery.matchExpression("qualc")!!, limit = 2).map { it.id }
+
+        assertEquals(listOf("new", "mid"), found)
+    }
+
+    @Test
     fun searchableText_joinsPopulatedFieldsOnly() {
         val memory = Memory(
             type = MemoryType.IMAGE,

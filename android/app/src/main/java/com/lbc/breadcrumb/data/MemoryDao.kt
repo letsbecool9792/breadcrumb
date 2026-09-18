@@ -40,6 +40,14 @@ interface MemoryDao {
     @Query("SELECT * FROM memories WHERE id = :id")
     suspend fun getById(id: String): Memory?
 
+    /**
+     * The rows behind a server search's results. Order is not kept -- the
+     * caller has the ranking -- and an id missing here is a memory deleted on
+     * the phone that the server still holds, since deletes do not sync.
+     */
+    @Query("SELECT * FROM memories WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<String>): List<Memory>
+
     @Query("SELECT COUNT(*) FROM memories")
     suspend fun count(): Int
 
@@ -148,6 +156,15 @@ interface MemoryDao {
             "ORDER BY memories.capturedAt DESC"
     )
     fun search(match: String): Flow<List<Memory>>
+
+    /** The same search, once: what the search screen shows while the ranked answer is on its way. */
+    @Query(
+        "SELECT memories.* FROM memories " +
+            "JOIN memories_fts ON memories.rowid = memories_fts.rowid " +
+            "WHERE memories_fts MATCH :match " +
+            "ORDER BY memories.capturedAt DESC LIMIT :limit"
+    )
+    suspend fun searchOnce(match: String, limit: Int): List<Memory>
 
     /**
      * Images whose text has not been read yet, newest first, so the one just
