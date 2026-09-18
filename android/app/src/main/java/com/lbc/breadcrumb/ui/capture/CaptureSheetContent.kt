@@ -2,7 +2,6 @@ package com.lbc.breadcrumb.ui.capture
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,9 +26,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -48,6 +44,7 @@ import com.lbc.breadcrumb.capture.CaptureSummary
 import com.lbc.breadcrumb.capture.CaptureUiState
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
+import com.lbc.breadcrumb.ui.common.DocumentGlyph
 import com.lbc.breadcrumb.ui.common.OriginalPreview
 import com.lbc.breadcrumb.ui.common.loadOriginalPreview
 import kotlinx.coroutines.Dispatchers
@@ -287,33 +284,6 @@ private fun DocumentPreview(preview: CapturePreview.Document) {
                 color = colors.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-/** A page with a folded corner and a few ruled lines, after the design's PDF tile. */
-@Composable
-private fun DocumentGlyph(modifier: Modifier) {
-    val page = MaterialTheme.colorScheme.outlineVariant
-    val ink = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
-    Canvas(modifier) {
-        val fold = size.width * 0.28f
-        val corner = CornerRadius(3.dp.toPx())
-        drawRoundRect(color = page, size = size, cornerRadius = corner)
-        // folded corner, top right
-        drawRect(color = ink.copy(alpha = 0.35f), topLeft = Offset(size.width - fold, 0f), size = Size(fold, fold))
-
-        val left = size.width * 0.18f
-        val lineH = 2.dp.toPx()
-        val widths = listOf(0.44f, 0.64f, 0.58f, 0.64f, 0.36f)
-        widths.forEachIndexed { i, w ->
-            val y = size.height * (0.36f + i * 0.12f)
-            drawRoundRect(
-                color = ink,
-                topLeft = Offset(left, y),
-                size = Size(size.width * w, lineH),
-                cornerRadius = CornerRadius(lineH / 2),
             )
         }
     }
