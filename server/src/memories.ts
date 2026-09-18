@@ -102,8 +102,8 @@ export const VECTOR_INDEX = "memories_vector";
  * filters on before searching; a field not declared here cannot be used as a
  * pre-filter, and adding one later means rebuilding the index.
  *
- * M0 allows three search indexes in total, so this plus the text index at 4.4
- * still leaves one spare.
+ * M0 allows three search indexes across the whole cluster, so this plus
+ * [TEXT_INDEX] leaves one spare.
  */
 export function vectorIndexDefinition(dimensions: number) {
   return {
@@ -117,33 +117,101 @@ export function vectorIndexDefinition(dimensions: number) {
   };
 }
 
-export type VectorIndexState = "created" | "exists" | "refused";
+export const TEXT_INDEX = "memories_text";
+
+/** Every field a memory's words live in. Searched together, one score across all. */
+export const TEXT_PATHS = [
+  "title",
+  "rawText",
+  "extractedText",
+  "enrichment.summary",
+  "enrichment.kind",
+  "enrichment.entities",
+  "enrichment.readText",
+];
 
 /**
- * Creates the vector index if the cluster does not have it.
+ * The Atlas Search index behind the keyword half of hybrid search (rule 5):
+ * the exact words and proper nouns an embedding blurs.
+ *
+ * lucene.english rather than lucene.standard: it drops stop words, so "that
+ * link from April" is not matched on "that" and "from" across the whole
+ * corpus, and it stems, so "governments" finds "government".
+ *
+ * The source app is a token, never text: provenance is a filter (4.3), and
+ * "WhatsApp" in a search must not match the label of every WhatsApp save.
+ * Like the vector index, it declares 4.3's filter fields up front, since
+ * adding one later means rebuilding.
+ */
+export function textIndexDefinition() {
+  return {
+    analyzer: "lucene.english",
+    searchAnalyzer: "lucene.english",
+    mappings: {
+      dynamic: false,
+      fields: {
+        title: { type: "string" },
+        rawText: { type: "string" },
+        extractedText: { type: "string" },
+        enrichment: {
+          type: "document",
+          fields: {
+            summary: { type: "string" },
+            kind: { type: "string" },
+            entities: { type: "string" },
+            readText: { type: "string" },
+          },
+        },
+        type: { type: "token" },
+        hasLink: { type: "boolean" },
+        capturedAt: { type: "date" },
+        sourceAppLabel: { type: "token" },
+      },
+    },
+  };
+}
+
+/** "full": the cluster already holds as many search indexes as its tier allows. */
+export type SearchIndexState = "created" | "exists" | "refused" | "full";
+
+/**
+ * Creates a search index if the collection does not have one by that name.
+ * An existing index is left alone, even if its definition has since changed
+ * here: a changed definition is updated deliberately, in the Atlas UI or with
+ * updateSearchIndex, since every update rebuilds the index.
  *
  * Returns "refused" rather than throwing when the database user may not manage
  * search indexes: readWriteAnyDatabase is enough for everything else this
  * server does, and widening it permanently for one index would be the wrong
- * trade -- create it in the Atlas UI from [vectorIndexDefinition] instead.
+ * trade -- create it in the Atlas UI from its definition instead.
  */
-export async function ensureVectorIndex(database: Db, dimensions: number): Promise<VectorIndexState> {
+export async function ensureSearchIndex(
+  database: Db,
+  name: string,
+  type: "search" | "vectorSearch",
+  definition: object,
+): Promise<SearchIndexState> {
   const collection = memories(database);
   try {
     const existing = await collection.listSearchIndexes().toArray();
-    if (existing.some((index) => index.name === VECTOR_INDEX)) return "exists";
+    if (existing.some((index) => index.name === name)) return "exists";
 
-    await collection.createSearchIndex({
-      name: VECTOR_INDEX,
-      type: "vectorSearch",
-      definition: vectorIndexDefinition(dimensions),
-    });
+    await collection.createSearchIndex({ name, type, definition });
     return "created";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (/maximum number of FTS indexes/i.test(message)) return "full";
     if (/not allowed|unauthorized|requires authentication|Atlas Search/i.test(message)) return "refused";
     throw error;
   }
+}
+
+export function ensureVectorIndex(database: Db, dimensions: number): Promise<SearchIndexState> {
+  return ensureSearchIndex(database, VECTOR_INDEX, "vectorSearch", vectorIndexDefinition(dimensions));
+}
+
+export function ensureTextIndex(database: Db): Promise<SearchIndexState> {
+  return ensureSearchIndex(database, TEXT_INDEX, "search", textIndexDefinition());
 }
 
 /** The same, for a batch: one round trip rather than one per memory. */

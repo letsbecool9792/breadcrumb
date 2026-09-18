@@ -2,7 +2,16 @@ import { createApp } from "./app.ts";
 import { connectMongo, databaseName, db, describeMongoError } from "./db.ts";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, geminiEmbedder } from "./embeddings.ts";
 import { geminiExtractor, geminiImageExtractor, INGEST_MODEL } from "./gemini.ts";
-import { ensureIndexes, ensureVectorIndex, VECTOR_INDEX, vectorIndexDefinition } from "./memories.ts";
+import {
+  ensureIndexes,
+  ensureTextIndex,
+  ensureVectorIndex,
+  type SearchIndexState,
+  TEXT_INDEX,
+  textIndexDefinition,
+  VECTOR_INDEX,
+  vectorIndexDefinition,
+} from "./memories.ts";
 
 const geminiKey = process.env.GEMINI_API_KEY;
 if (!geminiKey) {
@@ -24,19 +33,10 @@ try {
   await ensureIndexes(db());
   console.log(`mongodb connected, database "${databaseName()}"`);
 
-  const index = await ensureVectorIndex(db(), EMBEDDING_DIMENSIONS);
-  if (index === "refused") {
-    console.warn(
-      `cannot create the "${VECTOR_INDEX}" search index with this database user.\n` +
-        "Create it in Atlas (cluster -> Atlas Search -> Create Search Index -> JSON editor,\n" +
-        `on ${databaseName()}.memories, named ${VECTOR_INDEX}) with:\n` +
-        JSON.stringify(vectorIndexDefinition(EMBEDDING_DIMENSIONS), null, 2),
-    );
-  } else {
-    // a new index takes about half a minute on M0, and until then every search
-    // comes back empty rather than failing
-    console.log(`vector index "${VECTOR_INDEX}" ${index}${index === "created" ? ", searchable in about 30s" : ""}`);
-  }
+  // both halves of hybrid search (rule 5)
+  const vector = await ensureVectorIndex(db(), EMBEDDING_DIMENSIONS);
+  reportIndex(VECTOR_INDEX, vectorIndexDefinition(EMBEDDING_DIMENSIONS), vector);
+  reportIndex(TEXT_INDEX, textIndexDefinition(), await ensureTextIndex(db()));
 } catch (error) {
   console.error(`could not reach MongoDB: ${describeMongoError(error)}`);
   process.exit(1);
@@ -59,3 +59,25 @@ createApp({
   }
   console.log(`breadcrumb server on http://${host}:${port}`);
 });
+
+/**
+ * A missing search index does not fail a search -- Atlas answers that half
+ * with an empty list -- so startup is where one has to be said out loud.
+ */
+function reportIndex(name: string, definition: object, state: SearchIndexState) {
+  if (state === "exists") {
+    console.log(`search index "${name}" exists`);
+  } else if (state === "created") {
+    console.log(`search index "${name}" created, searchable in about 30s`);
+  } else {
+    console.warn(
+      (state === "full"
+        ? `cannot create the "${name}" search index: the cluster already holds as many as its tier allows\n` +
+          "(three on M0). Delete one you do not need in Atlas, then restart.\n"
+        : `cannot create the "${name}" search index with this database user.\n`) +
+        "To create it by hand: cluster -> Atlas Search -> Create Search Index -> JSON editor,\n" +
+        `on ${databaseName()}.memories, named ${name}, with:\n` +
+        JSON.stringify(definition, null, 2),
+    );
+  }
+}
