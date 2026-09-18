@@ -35,6 +35,8 @@ class MemoryUploader(
     private val batchSize: Int = 10,
     /** Pictures per request -- fewer, since each costs about a thousand tokens. */
     private val imageBatchSize: Int = 4,
+    /** Ids per delete or enrichment request. No model call is involved, so only size limits it. */
+    private val syncBatchSize: Int = 50,
     /** Below this much text in an image, the picture itself is worth reading. */
     private val minTextForReading: Int = 80,
     /** How long a freshly saved image may wait for OCR before it is sent anyway. */
@@ -142,6 +144,43 @@ class MemoryUploader(
             // to retry. The next batch would fare the same, and WorkManager's
             // backoff is a better place to wait than a loop here.
             if (waiting != null) return UploadOutcome.RetryLater(sent, waiting)
+        }
+    }
+
+    /**
+     * Sends deletes made on the phone (step 4.6). The server's delete is
+     * idempotent, so a batch that fails is simply sent again next time.
+     */
+    suspend fun sendDeletes(): UploadOutcome {
+        var sent = 0
+        while (true) {
+            val ids = dao.pendingDeletes(limit = syncBatchSize)
+            if (ids.isEmpty()) return UploadOutcome.Done(sent)
+            if (!api.delete(ids)) return UploadOutcome.RetryLater(sent, "the server did not take ${ids.size} deletes")
+            dao.forgetDeletes(ids)
+            sent += ids.size
+        }
+    }
+
+    /**
+     * Copies back what the model made of memories the server holds (step
+     * 4.6): the summary, the kind, what it saw in a picture. Every memory
+     * asked about is marked as copied, answer or not -- one the server holds
+     * without enrichment is asked about again only after it is next sent.
+     */
+    suspend fun fetchEnrichment(): UploadOutcome {
+        var copied = 0
+        while (true) {
+            val ids = dao.awaitingEnrichment(limit = syncBatchSize)
+            if (ids.isEmpty()) return UploadOutcome.Done(copied)
+
+            val answers = api.enrichment(ids)
+                ?: return UploadOutcome.RetryLater(copied, "could not ask for ${ids.size} enrichments")
+            for (id in ids) {
+                val answer = answers[id]
+                dao.setEnrichment(id, answer?.summary, answer?.kind, answer?.readText, clock())
+                if (answer?.summary != null) copied += 1
+            }
         }
     }
 

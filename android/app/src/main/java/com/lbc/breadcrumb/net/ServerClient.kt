@@ -56,7 +56,26 @@ interface MemoryUploadApi {
      * what the model saw (architecture rule 1).
      */
     suspend fun uploadImages(images: List<OutgoingImage>): Map<String, UploadResult>
+
+    /**
+     * What the model made of these memories (step 4.6), for the phone to keep.
+     * A memory the server does not hold is absent; one held but not enriched
+     * comes back empty. Null when the server could not be asked.
+     */
+    suspend fun enrichment(ids: List<String>): Map<String, Enrichment>?
+
+    /** Deletes these memories on the server. False when it could not be asked; sending again is safe. */
+    suspend fun delete(ids: List<String>): Boolean
 }
+
+/** What the model made of one memory, copied back to the phone (step 4.6). */
+@Serializable
+data class Enrichment(
+    val id: String,
+    val summary: String? = null,
+    val kind: String? = null,
+    val readText: String? = null,
+)
 
 /** What a search came back with (steps 4.1-4.4). */
 sealed interface SearchOutcome {
@@ -264,10 +283,48 @@ class ServerClient(
             }
         }
 
+    override suspend fun enrichment(ids: List<String>): Map<String, Enrichment>? = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptyMap()
+        postIds("/memories/enrichment", ids) { body ->
+            json.decodeFromString<EnrichmentReplies>(body).results.associateBy { it.id }
+        }
+    }
+
+    override suspend fun delete(ids: List<String>): Boolean = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext true
+        postIds("/memories/delete", ids) { body -> json.decodeFromString<DeleteReply>(body) } != null
+    }
+
+    /** POSTs `{"ids": [...]}` and reads a 200's body; null for anything else. */
+    private fun <T> postIds(path: String, ids: List<String>, read: (String) -> T): T? {
+        val request = Request.Builder()
+            .url("$baseUrl$path")
+            .post(json.encodeToString(IdsPayload(ids)).toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        return try {
+            uploadHttp.newCall(request).execute().use { response ->
+                val body = response.body.string()
+                if (response.isSuccessful) runCatching { read(body) }.getOrNull() else null
+            }
+        } catch (_: IOException) {
+            null
+        }
+    }
+
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }
+
+@Serializable
+private data class IdsPayload(val ids: List<String>)
+
+@Serializable
+private data class EnrichmentReplies(val results: List<Enrichment>)
+
+/** Only that the server answered as the delete endpoint does; the count is not needed. */
+@Serializable
+private data class DeleteReply(val deleted: Int)
 
 /**
  * The wire shape of a memory. Hand-written to match the server (CLAUDE.md: no

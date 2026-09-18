@@ -307,6 +307,61 @@ class ServerClientTest {
         assertTrue(outcome.reason.contains("adb reverse"))
     }
 
+    // --- keeping the phone in step (4.6); the shapes are server/src/sync.ts's ---
+
+    @Test
+    fun `enrichment is asked for by id and read back by id`() = runBlocking {
+        respond(
+            200,
+            """{"results":[
+                {"id":"a","summary":"Comments about the TVA","kind":"screenshot","readText":"A Reddit thread"},
+                {"id":"b","summary":null,"kind":null,"readText":null}
+            ]}""",
+        )
+
+        val answers = client().enrichment(listOf("a", "b", "missing"))!!
+
+        val request = server.takeRequest()
+        assertEquals("/memories/enrichment", request.url.encodedPath)
+        assertEquals("""{"ids":["a","b","missing"]}""", request.body?.utf8())
+        assertEquals(Enrichment("a", "Comments about the TVA", "screenshot", "A Reddit thread"), answers["a"])
+        assertEquals(Enrichment("b"), answers["b"])
+        // not held by the server: absent, not invented
+        assertEquals(null, answers["missing"])
+    }
+
+    @Test
+    fun `enrichment that could not be asked for is no answer at all`() = runBlocking {
+        respond(503, "")
+        assertEquals(null, client().enrichment(listOf("a")))
+
+        respond(200, "OK")
+        assertEquals(null, client().enrichment(listOf("a")))
+    }
+
+    @Test
+    fun `a delete is sent by id and counts only when the server confirms it`() = runBlocking {
+        respond(200, """{"deleted":1}""")
+        assertTrue(client().delete(listOf("gone")))
+        val request = server.takeRequest()
+        assertEquals("/memories/delete", request.url.encodedPath)
+        assertEquals("""{"ids":["gone"]}""", request.body?.utf8())
+
+        // anything short of that leaves the delete queued for another try
+        respond(500, "")
+        assertFalse(client().delete(listOf("gone")))
+        respond(200, "<html>something else</html>")
+        assertFalse(client().delete(listOf("gone")))
+    }
+
+    @Test
+    fun `a delete with nowhere to go is not confirmed`() = runBlocking {
+        val client = client()
+        server.close()
+
+        assertFalse(client.delete(listOf("gone")))
+    }
+
     @Test
     fun `a server that never answers times out`() = runBlocking {
         server.enqueue(

@@ -11,6 +11,7 @@ import com.lbc.breadcrumb.data.MemoryDao
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.data.OriginalStore
 import com.lbc.breadcrumb.data.SyncState
+import com.lbc.breadcrumb.net.Enrichment
 import com.lbc.breadcrumb.net.MemoryUploadApi
 import com.lbc.breadcrumb.net.OutgoingImage
 import com.lbc.breadcrumb.net.UploadResult
@@ -61,7 +62,24 @@ class MemoryUploaderTest {
             pictures += images.map { it.memoryId }
             return images.associate { it.memoryId to pictureAnswer(it.memoryId) }
         }
+
+        override suspend fun enrichment(ids: List<String>): Map<String, Enrichment>? {
+            asked += ids
+            return if (serverAnswers) held.filterKeys { it in ids } else null
+        }
+
+        override suspend fun delete(ids: List<String>): Boolean {
+            if (!serverAnswers) return false
+            deleted += ids
+            return true
+        }
     }
+
+    /** What the fake server made of the memories it holds. */
+    private val held = mutableMapOf<String, Enrichment>()
+    private val asked = mutableListOf<String>()
+    private val deleted = mutableListOf<String>()
+    private var serverAnswers = true
 
     private lateinit var sandbox: File
     private lateinit var store: OriginalStore
@@ -408,5 +426,109 @@ class MemoryUploaderTest {
         uploader(now = 10_000).uploadPending()
 
         assertEquals(listOf("stubborn"), sent)
+    }
+
+    // --- deletes (step 4.6) -------------------------------------------------------
+
+    @Test
+    fun aDeleteOnThePhoneReachesTheServerOnce() = runBlocking {
+        val memory = saved("gone", state = SyncState.SYNCED)
+        dao.deleteEverywhere(memory, now = 5_000)
+
+        uploader().sendDeletes()
+        uploader().sendDeletes()
+
+        assertEquals(listOf("gone"), deleted)
+        assertEquals(0, dao.pendingDeleteCount())
+    }
+
+    @Test
+    fun aDeleteTheServerDidNotTakeIsKeptForNextTime() = runBlocking {
+        dao.deleteEverywhere(saved("gone"), now = 5_000)
+        serverAnswers = false
+
+        val outcome = uploader().sendDeletes()
+
+        assertTrue(outcome is UploadOutcome.RetryLater)
+        assertEquals(1, dao.pendingDeleteCount())
+    }
+
+    @Test
+    fun aDeleteTakenBackIsNeverSent() = runBlocking {
+        val memory = saved("back", state = SyncState.SYNCED)
+        dao.deleteEverywhere(memory, now = 5_000)
+        dao.restore(memory.copy(syncState = SyncState.PENDING))
+
+        uploader().sendDeletes()
+        uploader().uploadPending()
+
+        assertTrue(deleted.isEmpty())
+        // and it goes up again, which costs nothing if the server still has it
+        assertEquals(listOf("back"), sent)
+    }
+
+    // --- enrichment copied back (step 4.6) ------------------------------------------
+
+    @Test
+    fun whatTheModelMadeOfAMemoryIsKeptOnThePhone() = runBlocking {
+        saved("shot", state = SyncState.SYNCED)
+        held["shot"] = Enrichment("shot", summary = "Comments about the TVA", kind = "screenshot", readText = "A Reddit thread")
+
+        uploader(now = 7_000).fetchEnrichment()
+
+        val stored = dao.getById("shot")!!
+        assertEquals("Comments about the TVA", stored.summary)
+        assertEquals("screenshot", stored.kind)
+        assertEquals("A Reddit thread", stored.readText)
+        assertEquals(7_000L, stored.enrichedAt)
+    }
+
+    @Test
+    fun aMemoryIsAskedAboutOnceUntilItIsSentAgain() = runBlocking {
+        // held by the server, but with nothing to say about it yet
+        saved("thin", state = SyncState.SYNCED)
+
+        uploader().fetchEnrichment()
+        uploader().fetchEnrichment()
+        assertEquals(listOf("thin"), asked)
+
+        // sent again -- new text, say -- and the copy is stale until asked for
+        dao.update(dao.getById("thin")!!.copy(syncState = SyncState.UPLOADING))
+        dao.markSynced("thin", remoteId = "thin")
+        uploader().fetchEnrichment()
+
+        assertEquals(listOf("thin", "thin"), asked)
+    }
+
+    @Test
+    fun onlyMemoriesTheServerHoldsAreAskedAbout() = runBlocking {
+        saved("queued", state = SyncState.PENDING)
+        saved("synced", state = SyncState.SYNCED)
+
+        uploader().fetchEnrichment()
+
+        assertEquals(listOf("synced"), asked)
+    }
+
+    @Test
+    fun aServerOutOfReachLeavesEnrichmentToAskForLater() = runBlocking {
+        saved("synced", state = SyncState.SYNCED)
+        serverAnswers = false
+
+        val outcome = uploader().fetchEnrichment()
+
+        assertTrue(outcome is UploadOutcome.RetryLater)
+        assertNull(dao.getById("synced")!!.enrichedAt)
+    }
+
+    @Test
+    fun aPictureReadMakesTheCopyStale() = runBlocking {
+        saved("photo", state = SyncState.SYNCED)
+        uploader(now = 7_000).fetchEnrichment()
+        assertNotNull(dao.getById("photo")!!.enrichedAt)
+
+        dao.markImageSent("photo", now = 8_000)
+
+        assertNull(dao.getById("photo")!!.enrichedAt)
     }
 }

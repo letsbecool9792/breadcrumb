@@ -30,7 +30,15 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             store = OriginalStore(applicationContext),
         )
 
-        // Memories first: a picture is only read for a memory the server holds.
+        // Deletes first: nothing else needs to wait on them, and a memory
+        // deleted and then restored has already been re-queued as PENDING.
+        val deletes = uploader.sendDeletes()
+        if (deletes is UploadOutcome.RetryLater) {
+            Log.i(TAG, "deleted ${deletes.sent}, stopping: ${deletes.reason}")
+            return Result.retry()
+        }
+
+        // Memories next: a picture is only read for a memory the server holds.
         val memories = uploader.uploadPending()
         if (memories is UploadOutcome.RetryLater) {
             Log.i(TAG, "uploaded ${memories.sent}, stopping: ${memories.reason}")
@@ -43,9 +51,17 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             return Result.retry()
         }
 
-        val sent = (memories as UploadOutcome.Done).sent
-        val read = (images as UploadOutcome.Done).sent
-        if (sent > 0 || read > 0) Log.i(TAG, "uploaded $sent, read $read pictures")
+        // Last, what the model made of all of it, copied back to the phone.
+        val enriched = uploader.fetchEnrichment()
+        if (enriched is UploadOutcome.RetryLater) {
+            Log.i(TAG, "copied ${enriched.sent} enrichments, stopping: ${enriched.reason}")
+            return Result.retry()
+        }
+
+        val counts = listOf(deletes, memories, images, enriched).map { (it as UploadOutcome.Done).sent }
+        if (counts.any { it > 0 }) {
+            Log.i(TAG, "deleted ${counts[0]}, uploaded ${counts[1]}, read ${counts[2]} pictures, copied ${counts[3]} enrichments")
+        }
         return Result.success()
     }
 
