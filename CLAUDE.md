@@ -142,6 +142,9 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **`extractedText`: null means not read yet, empty means read and holding no text.** `OcrQueue` finds its work by that null, so never write empty to mean anything else, and resetting a row to null queues it to be read again.
 - **Nothing calls OCR.** `OcrQueue` starts in `BreadcrumbApp.onCreate` — every process, capture included — and watches Room for unread images. Any code that inserts IMAGE rows, the 5.1 importer included, gets them read without doing anything.
 - **ML Kit reports usage to Google — accepted, 2026-09-15.** Its logging queue shows up as `databases/com.google.android.datatransport.events` in app storage. What it sends is SDK usage and performance data, not images or recognized text, so rule 1's stance holds: originals and their text stay on the device. Accepted rather than stripped, since removing the transport service by manifest merge is unsupported and could break on an ML Kit update. Revisit if the privacy stance tightens.
+- **A Text given a style takes nothing from the theme**, so every style names its face — use the helpers in `ui/home/HomeType.kt` (`serif`, `sans`, `monoStyle`), never a bare `TextStyle(fontSize = …)`, which falls back to the platform font. Text given only loose parameters (as the capture sheet's are) inherits Material's type scale, which is set in Instrument Sans.
+- **The detail sheet is the app's own `SheetLayer`, not Material's `ModalBottomSheet`.** A shared-element transition — the picture travelling from its tile — only works within one composition, and Material's sheet lives in a window of its own. `SheetLayer` gives back what Material's gave: a height limit, a scrim that closes it, Back, and drag-to-dismiss handed off from the content's scroll through a nested-scroll connection.
+- **Animations that loop or follow a gesture run only while shown, and are read while drawing** (`graphicsLayer`, `drawBehind`, `Canvas`), not in composition: an infinite transition left running at rest redraws every frame, and reading one in composition recomposes every frame.
 - **Upsert with `@Upsert`, never `@Insert(onConflict = REPLACE)`.** `memories_fts` is an external-content index kept in step by triggers, and REPLACE deletes the old row without firing delete triggers — the old text would stay searchable. `MemorySearchTest` covers it.
 - **Search input always goes through `FtsQuery.matchExpression`**, never straight into MATCH: raw input containing `"`, `-`, `OR` or `column:` is a syntax error or means something else. FTS4 (Room supports no FTS5) has no ranking function, so local results are newest first.
 - **An AutoMigration that adds or changes the FTS table does not index existing rows.** Room recreates the sync triggers after migrating, but the triggers only see later writes. v3 → v4 rebuilds the index in its spec (`BuildSearchIndex`); any future change to the FTS columns needs the same.
@@ -225,6 +228,8 @@ Instrumented tests, **without wiping saved memories**. Gradle's `connectedDebugA
 cd android && ./gradlew installDebug installDebugAndroidTest
 adb shell am instrument -w com.lbc.breadcrumb.test/androidx.test.runner.AndroidJUnitRunner
 ```
+
+**If a build fails with "The paging file is too small" (or a JVM `hs_err_pid` crash log appears in `android/app/`):** the machine is out of memory — idle Gradle daemons hold ~1 GB each. `./gradlew --stop` frees them; leave any other Java process alone, as VS Code's Java extension runs its own. Delete the crash log; it is not for committing.
 
 **If a build fails with `jlink executable ... redhat.java ... does not exist`:** VS Code's Java extension imported `android/` and left an idle Gradle daemon running on its bundled JRE, which has no `jlink`. `gradlew` reuses any idle Java 21 daemon, so it inherits the broken JVM. Run `./gradlew --stop` and rebuild. To stop it recurring, set `"java.import.gradle.enabled": false` in VS Code for this workspace — that extension cannot build Android projects anyway, and the daemon it keeps alive is pure RAM cost.
 
@@ -339,8 +344,8 @@ Do not start the next step until the current one is ticked. Do not batch several
       · *test:* a failure (empty clipboard) → reason and a Close button
       · verified on device, all paths: previews, undo, failures, and a clean close with no
         dim sliding away afterwards
-      · open: mono text uses the system monospace as a stand-in for IBM Plex Mono; bundling
-        the design's fonts is a separate decision
+      · the system monospace stood in for IBM Plex Mono here; the canvas's faces were bundled
+        at 4.6
 
 ### Phase 2 — On-device intelligence (still no backend)
 
@@ -518,12 +523,26 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
         `ServerClientTest` (both calls); on-device `MemoryDaoTest` (delete, restore, clear,
         a copied summary found by local search) and `MemoryUploaderTest` (deletes sent once,
         kept when unconfirmed, never sent when undone; readings copied, asked once per send)
-      · **in progress — the design pass**, agreed 2026-09-18: bundle the canvas's own faces
-        (Instrument Serif for titles, Instrument Sans for what was saved, IBM Plex Mono for
-        chrome); a large serif "breadcrumb" at the top that shrinks into the strip on scroll;
-        notes as serif pull-quotes; captions over picture tiles; a crumb-trail loader in the
-        search field; results gliding to their ranked places; the mosaic staggering in, saves
-        dropping in, deletes collapsing out; the tile expanding into its detail; haptics
+      · **built, awaiting the user's check on the phone — the design pass**, agreed
+        2026-09-18, on the `design-pass` branch, one commit per piece; the user merges it
+        once verified. Built as agreed:
+        - the canvas's own faces bundled (`res/font`, OFL licences in `assets/licenses`):
+          Instrument Serif for what a thing is called, Instrument Sans for what was saved,
+          IBM Plex Mono for chrome; Material's type scale set in them too
+        - "breadcrumb" large in the serif at the head of the mosaic, handing over to a slim
+          strip as it scrolls away
+        - picture tiles all picture, captioned over a shade; notes as serif-italic pull-quotes
+        - the crumb trail walking in the search field while a search is out (no "searching…"),
+          and an amber light behind the field, breathing while it searches
+        - results rising in, a stagger apart; rows gliding to their ranked places when the
+          ranking replaces the word matches; the matched word warming to amber
+        - the mosaic rising in on launch; a new save or an Undo dropping in with the crumb's
+          bounce; a deleted tile fading while its neighbours close the gap
+        - a picture or PDF page travelling from its tile or row up into the detail and back
+        - haptics: results landing, a delete, the debug long press, a sheet pulled past its
+          dismiss point
+      · *test:* `./gradlew testDebugUnitTest` — `MastheadTest`, `CrumbTrailTest`,
+        `MosaicEntrancesTest`; the motion itself is checked on the phone
 
 ### Phase 5 — Seeding
 
