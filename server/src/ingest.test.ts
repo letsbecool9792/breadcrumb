@@ -100,6 +100,11 @@ describe(
       return texts.map(() => embedding as number[]);
     };
 
+    /** These tests never post a picture; images have their own suite. */
+    const noImages = async () => {
+      throw new Error("the image extractor is not used by these tests");
+    };
+
     const post = (body: unknown) =>
       fetch(`${base}/memories`, {
         method: "POST",
@@ -113,7 +118,7 @@ describe(
       // means each suite's cleanup wipes the other's documents mid-test
       database = db(`${databaseName()}_test_ingest`);
       await ensureIndexes(database);
-      server = createApp({ log: false, extract, embed, database }).listen(0, "127.0.0.1");
+      server = createApp({ log: false, extract, embed, extractImages: noImages, database }).listen(0, "127.0.0.1");
       await once(server, "listening");
       base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     });
@@ -340,7 +345,7 @@ describe(
         const first = inputs[0];
         return first ? new Map([[first.index, extraction as Extraction]]) : new Map();
       };
-      const app = createApp({ log: false, extract: partial, embed, database });
+      const app = createApp({ log: false, extract: partial, embed, extractImages: noImages, database });
       const server2 = app.listen(0, "127.0.0.1");
       await once(server2, "listening");
       const base2 = `http://127.0.0.1:${(server2.address() as AddressInfo).port}`;

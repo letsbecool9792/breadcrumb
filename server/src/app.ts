@@ -2,11 +2,15 @@ import express, { type NextFunction, type Request, type Response } from "express
 import type { Db } from "mongodb";
 import { db } from "./db.ts";
 import type { Embedder } from "./embeddings.ts";
-import type { Extractor } from "./gemini.ts";
+import type { Extractor, ImageExtractor } from "./gemini.ts";
+import { ingestImages, parseImages } from "./images.ts";
 import { type IncomingMemory, ingest, parseMemory } from "./ingest.ts";
 
 /** One request's worth of memories. The phone sends ten; this is the ceiling. */
 const MAX_BATCH = 50;
+
+/** Pictures cost about a thousand tokens each, so far fewer of them per request. */
+const MAX_IMAGE_BATCH = 8;
 
 export interface AppOptions {
   /** One line per request. Off in tests, where it only buries the results. */
@@ -15,6 +19,8 @@ export interface AppOptions {
   extract: Extractor;
   /** Turns a memory into a vector. Injected for the same reason. */
   embed: Embedder;
+  /** The Gemini pass over saved pictures (step 3.6). */
+  extractImages: ImageExtractor;
   /** Defaults to the process-wide connection; tests pass their own database. */
   database?: Db;
 }
@@ -23,7 +29,7 @@ export interface AppOptions {
  * The HTTP surface, built without listening so tests can serve it on any
  * port. Stays thin: health, ingest, and search at 4.1.
  */
-export function createApp({ log = true, extract, embed, database }: AppOptions) {
+export function createApp({ log = true, extract, embed, extractImages, database }: AppOptions) {
   const app = express();
   app.disable("x-powered-by");
 
@@ -68,6 +74,27 @@ export function createApp({ log = true, extract, embed, database }: AppOptions) 
     // 200 would mark them synced on the phone and leave them unenriched for good.
     const status = results.some((result) => result.retryable) ? 503 : 200;
     res.status(status).json(Array.isArray(req.body) ? { results } : results[0]);
+  });
+
+  // Pictures, for memories already stored here. They arrive as base64 in the
+  // body and are never written anywhere: the cloud keeps what the model read,
+  // and the original stays on the phone (architecture rule 1).
+  app.post("/memories/images", express.json({ limit: "24mb" }), async (req, res) => {
+    const batch = Array.isArray(req.body) ? req.body : [];
+    if (batch.length === 0 || batch.length > MAX_IMAGE_BATCH) {
+      res.status(400).json({ error: `send between 1 and ${MAX_IMAGE_BATCH} images` });
+      return;
+    }
+
+    const parsed = parseImages(batch);
+    if (!parsed.ok) {
+      res.status(400).json({ error: "invalid image", details: parsed.errors });
+      return;
+    }
+
+    const results = await ingestImages(database ?? db(), extractImages, embed, parsed.images);
+    const status = results.some((result) => result.retryable) ? 503 : 200;
+    res.status(status).json({ results });
   });
 
   // JSON, never Express's HTML pages: the only client parses JSON.

@@ -104,6 +104,8 @@ export function embeddingText(
     enrichment?.kind,
     memory.title,
     enrichment?.entities?.join(", "),
+    // what the model saw in the picture, when it was read as one (3.6)
+    enrichment?.readText,
     memory.rawText,
     memory.extractedText,
   ]

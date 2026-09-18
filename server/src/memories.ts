@@ -45,6 +45,10 @@ export interface MemoryDoc {
   embeddedWith?: { model: string; dimensions: number; at: Date };
   /** Fingerprint of the text [embedding] was made from, as with [enrichedFrom]. */
   embeddedFrom?: string;
+
+  /** Fingerprint of the picture that was read (step 3.6), so the same one is never read twice. */
+  imageReadFrom?: string;
+  imageReadAt?: Date;
   /** Why the last embedding attempt failed, when it did. */
   embeddingError?: string;
   /**
@@ -59,6 +63,8 @@ export interface Enrichment {
   kind: string;
   entities: string[];
   dates: string[];
+  /** What the model saw in the picture, when the memory was read as one (step 3.6). */
+  readText?: string;
   at: Date;
 }
 

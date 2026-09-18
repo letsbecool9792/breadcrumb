@@ -1,7 +1,7 @@
 import { createApp } from "./app.ts";
 import { connectMongo, databaseName, db, describeMongoError } from "./db.ts";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, geminiEmbedder } from "./embeddings.ts";
-import { geminiExtractor, INGEST_MODEL } from "./gemini.ts";
+import { geminiExtractor, geminiImageExtractor, INGEST_MODEL } from "./gemini.ts";
 import { ensureIndexes, ensureVectorIndex, VECTOR_INDEX, vectorIndexDefinition } from "./memories.ts";
 
 const geminiKey = process.env.GEMINI_API_KEY;
@@ -44,6 +44,7 @@ console.log(`gemini models: ${INGEST_MODEL} for ingest, ${EMBEDDING_MODEL} at ${
 
 createApp({
   extract: geminiExtractor(geminiKey),
+  extractImages: geminiImageExtractor(geminiKey),
   embed: geminiEmbedder(geminiKey),
 }).listen(port, host, (error) => {
   if (error) {

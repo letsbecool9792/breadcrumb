@@ -45,6 +45,12 @@ export interface Extraction {
   entities: string[];
   /** Dates the content refers to, resolved to YYYY-MM-DD. */
   dates: string[];
+  /**
+   * What a picture shows or says, when the memory was read as one (step 3.6).
+   * On-device OCR reads the words; this is the rest -- the chart, the face,
+   * the room -- which is what makes an image with little text findable.
+   */
+  readText?: string;
 }
 
 /** What the extractor is given. Text only for now; images arrive at 3.6. */
@@ -67,6 +73,20 @@ export interface ExtractionInput {
  * result.
  */
 export type Extractor = (inputs: ExtractionInput[]) => Promise<Map<number, Extraction>>;
+
+/** One saved image, as bytes. Nothing is written to disk here or anywhere (rule 1). */
+export interface ImageExtractionInput {
+  index: number;
+  mimeType: string;
+  /** base64, straight from the phone into the model. */
+  data: string;
+  capturedAt: Date;
+  sourceAppLabel?: string | null;
+  /** Whatever came with it: a caption, and what on-device OCR could read. */
+  text?: string | null;
+}
+
+export type ImageExtractor = (inputs: ImageExtractionInput[]) => Promise<Map<number, Extraction>>;
 
 const ITEM_SCHEMA = {
   type: "object",
@@ -108,6 +128,33 @@ would describe the thing to themselves, not as a caption or an advertisement.`;
 
 /** Long enough for a screenshot's text, short enough that one item cannot crowd out a batch. */
 const MAX_ITEM_CHARS = 4_000;
+
+const IMAGE_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    ...ITEM_SCHEMA.properties,
+    readText: {
+      type: "string",
+      description: "What the picture shows, and any words in it. A few lines at most. Empty if it shows nothing worth describing.",
+    },
+  },
+  required: [...ITEM_SCHEMA.required, "readText"],
+  additionalProperties: false,
+};
+
+const IMAGE_SCHEMA = {
+  type: "object",
+  properties: { items: { type: "array", items: IMAGE_ITEM_SCHEMA } },
+  required: ["items"],
+  additionalProperties: false,
+};
+
+const IMAGE_INSTRUCTION = `${INSTRUCTION}
+
+Each item here is a picture the person saved -- a screenshot, a photo -- given as an image, in the
+order the items are numbered. Describe what is actually in it: what it shows, and any words that
+appear in it. Someone will later look for it by describing it from memory, so name what they would
+remember: the place, the person, the app it came from, the thing being shown.`;
 
 /**
  * One multimodal call, not a pipeline of them (architecture rule 3). Whatever
@@ -167,6 +214,57 @@ export async function retryTransient<T>(call: () => Promise<T>, delaysMs = [1_00
 }
 
 /**
+ * Reads several saved pictures in one call (step 3.6).
+ *
+ * Images are the expensive input -- around a thousand tokens each, against a
+ * few hundred for text -- so the phone sends only pictures whose words OCR
+ * could not read, and sends them few at a time.
+ */
+export function geminiImageExtractor(apiKey: string): ImageExtractor {
+  const ai = new GoogleGenAI({ apiKey });
+
+  return async (inputs) => {
+    if (inputs.length === 0) return new Map();
+    return retryTransient(async () => {
+      const response = await ai.models.generateContent({
+        model: INGEST_MODEL,
+        contents: [
+          {
+            parts: inputs.flatMap((input) => [
+              { text: describeImage(input) },
+              { inlineData: { mimeType: input.mimeType, data: input.data } },
+            ]),
+          },
+        ],
+        config: {
+          systemInstruction: IMAGE_INSTRUCTION,
+          temperature: 0,
+          responseMimeType: "application/json",
+          responseJsonSchema: IMAGE_SCHEMA,
+        },
+      });
+
+      const text = response.text;
+      if (!text) throw new Error("Gemini returned no text");
+      return parseExtractions(text);
+    });
+  };
+}
+
+/** The line that introduces one picture, immediately before the picture itself. */
+function describeImage(input: ImageExtractionInput): string {
+  return [
+    `--- Item ${input.index}`,
+    `Saved on: ${input.capturedAt.toISOString().slice(0, 10)}`,
+    input.sourceAppLabel ? `Shared from: ${input.sourceAppLabel}` : null,
+    input.text?.trim() ? `Saved with this text: ${input.text.trim().slice(0, MAX_ITEM_CHARS)}` : null,
+    "The picture follows.",
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
+}
+
+/**
  * One saved item as the model sees it, metadata included -- it is context, not
  * noise. Numbered rather than keyed by the memory's id, because a model copies
  * a small integer back reliably and a UUID often not.
@@ -205,11 +303,13 @@ export function parseExtractions(text: string): Map<number, Extraction> {
     const index = value["index"];
     if (typeof index !== "number" || !Number.isInteger(index)) continue;
 
+    const readText = asString(value["readText"]);
     extractions.set(index, {
       summary: asString(value["summary"]),
       kind: asString(value["kind"]),
       entities: asStrings(value["entities"]),
       dates: asStrings(value["dates"]),
+      ...(readText ? { readText } : {}),
     });
   }
   return extractions;
