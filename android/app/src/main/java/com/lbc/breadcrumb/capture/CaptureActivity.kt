@@ -129,9 +129,12 @@ abstract class CaptureActivity : ComponentActivity() {
         app.applicationScope.launch {
             write?.join()
             toRemove.forEach {
-                dao.delete(it)
+                // The sheet stays up until dismissed, and the upload queue may
+                // have sent the memory meanwhile: the delete goes to the server too.
+                dao.deleteEverywhere(it, System.currentTimeMillis())
                 store.delete(it)
             }
+            if (toRemove.isNotEmpty()) UploadWorker.schedule(applicationContext)
         }
     }
 }

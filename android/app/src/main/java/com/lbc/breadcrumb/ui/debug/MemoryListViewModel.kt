@@ -104,13 +104,16 @@ class MemoryListViewModel(app: Application) : AndroidViewModel(app) {
      * disk, which is harmless; the reverse would not be.
      */
     fun delete(memory: Memory) = viewModelScope.launch(Dispatchers.IO) {
-        dao.delete(memory)
+        dao.deleteEverywhere(memory, System.currentTimeMillis())
         store.delete(memory)
+        UploadWorker.schedule(getApplication())
     }
 
+    /** Everything, on the server too. */
     fun clearAll() = viewModelScope.launch(Dispatchers.IO) {
-        dao.clear()
+        dao.clearEverywhere(System.currentTimeMillis())
         store.clear()
+        UploadWorker.schedule(getApplication())
     }
 
     private companion object {
