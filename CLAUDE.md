@@ -177,21 +177,24 @@ npm run typecheck
 - **`/health` names the service** (`{"service":"breadcrumb","status":"ok"}`) and the app checks the name, so another dev server holding port 3000 is not mistaken for this one. `ServerClientTest` holds the app's side of that contract; change both together.
 - **Secrets live in `server/.env`**, copied from `.env.example` and loaded by Node's own `--env-file-if-exists` — no dotenv. Every `=` line needs its `KEY=` prefix; a bare connection string pasted in makes Node read everything up to the first `=` as the variable name, and the value simply goes missing.
 - **The Atlas user is `readWriteAnyDatabase`, not `atlasAdmin`.** Enough to read, write and create indexes, and deliberately not enough to drop a database — so tests drop their own *collection* instead. If 3.4's search-index creation is refused for the same reason, create that index in the Atlas UI rather than widening the role for good.
-- **Server tests run against the real cluster** in `<MONGODB_DB>_test`, and skip themselves when `MONGODB_URI` is unset. **Close the Mongo client in a `finally`** in any hook: a teardown that throws with the client still open hangs the whole run instead of reporting the failure that caused it.
+- **Server tests run against the real cluster** in `<MONGODB_DB>_test` (the search tests are the one exception — see below), and skip themselves when `MONGODB_URI` is unset. **Close the Mongo client in a `finally`** in any hook: a teardown that throws with the client still open hangs the whole run instead of reporting the failure that caused it.
 - A free M0 cluster **pauses itself after 60 days idle** and has to be resumed from the Atlas UI.
 - **`node --test` runs each test file in its own process, in parallel.** Two suites sharing one database wipe each other's documents mid-test, and the failures look like impossible counts. Give every test file its own database: `<MONGODB_DB>_test_<suite>`.
 - **A memory is stored even when the model call fails**, with the reason in `enrichmentError`. The phone has already said "Saved" (rule 2), so a document that is merely unenriched can be fixed later, while a missing one is a memory that quietly never synced. Anything re-enriching later looks for that field.
 - **The ingest request is parsed field by field and unknown fields are dropped**, so `localUri` cannot reach the cloud whatever the client sends (rule 1). A test is named for it.
 - **`gemini-embedding-001` only returns unit-length vectors at its full 3072 dims.** At 768 they must be L2-normalised before storage, or cosine similarity measures length as much as meaning. Anything that produces an embedding — ingest, and query embedding at 4.1 — normalises.
 - **Documents and search phrases are embedded under different task types** (`RETRIEVAL_DOCUMENT`, `RETRIEVAL_QUERY`). Using one for both quietly costs retrieval quality.
-- **A vector index's filter fields must be declared up front.** `memories_vector` declares `type`, `hasLink`, `capturedAt` and `sourceAppLabel` for 4.3; adding another later means rebuilding the index. M0 allows three search indexes, and the text index at 4.4 is the second.
+- **A vector index's filter fields must be declared up front.** `memories_vector` declares `type`, `hasLink`, `capturedAt` and `sourceAppLabel` for 4.3; adding another later means rebuilding the index. `memories_text` declares the same four. **Startup never updates an existing index**, only creates a missing one: a changed definition is applied deliberately (`updateSearchIndex` or the Atlas UI), since every update rebuilds.
 - **`FAILED` means the server refused a memory**, and is not retried automatically: the same bytes would be refused again. Transient failures go back to `PENDING` instead, and the debug Sync button queues refused ones again.
 - **A model call that may succeed later must answer 503, never 200.** A 200 marks the memory synced on the phone, and nothing re-enriches it afterwards — the phone re-sending it *is* the re-enrichment path.
 - **Pictures reach the server as base64 JSON and are never written anywhere**, not even a temp file (rule 1). `/memories/images` only reads pictures for memories it already holds; the phone sends memories first and pictures after, in the same worker run.
 - **OCR must ask for an upload pass after *every* read, including one that found nothing.** Images are held back until OCR has looked at them, and an empty read is the very case whose picture gets sent — skip the signal and those photos wait for the next save or launch.
-- **A missing search index is not an error.** `$vectorSearch` against an index that does not exist answers an empty list, so a search that found nothing and an index never created look the same. Startup creates the index and says so; if search returns nothing at all, check the index before the query.
-- **A new search index takes ~30s on M0 to become queryable**, and M0 allows three per *cluster*. Search tests build a throwaway index on their own test collection and drop the collection afterwards, which is most of that suite's run time. Real indexes plus the tests' temporary ones must fit in three at once.
-- **Search results are an allow-list projection** (`vectorSearchPipeline`). The text goes back whole; the vector never leaves. A field added to the document stays in the cloud until it is listed.
+- **A missing search index is not an error.** `$vectorSearch` or `$search` against an index that does not exist answers an empty list, so hybrid search quietly becomes one-half search. Startup creates both indexes and says so; if results look like only meaning or only words, check the indexes before the query.
+- **M0 holds three search indexes per *cluster*** (confirmed 2026-09-18: a third was refused with "maximum number of FTS indexes"). A new one takes ~30s to become queryable. The real collection uses two.
+- **The search tests borrow the real indexes** — decided 2026-09-18, because a test pair plus the real pair would make four. The rules that keep it safe: every test document carries `sourceAppLabel: "breadcrumb-test"` and a fixed id; every search in the tests filters on that label **in both halves**; cleanup deletes only those ids while they still carry the label; nothing drops, empties or updates anything else. Move them to a second free cluster when deploying.
+- **A search filter must narrow both halves** (`searchPipeline`): MQL in `$vectorSearch.filter`, a compound `filter` in `$search`. Narrow only one and the other brings back what was filtered out.
+- **Search results are an allow-list projection** (`searchPipeline`). The text goes back whole; the vector never leaves. A field added to the document stays in the cloud until it is listed.
+- **PowerShell 5.1 strips double quotes from arguments to native programs**, here-strings included, so a `git commit -m` message containing `"` splits into pathspecs. Commit with `git commit -F <file>`.
 - **Live model tests skip themselves when Gemini is overloaded** (503/429 after retries). A third party's capacity is not something to fail a build over — but a skip is not a pass, so read the run's skip lines.
 
 ### Editors
@@ -417,15 +420,16 @@ Do not start the next step until the current one is ticked. Do not batch several
 
 ### Phase 4 — Retrieval
 
-**Order changed 2026-09-18:** 4.4 comes straight after 4.1, before the UI. A keyword query
+**Order changed 2026-09-18:** the server steps first — 4.1, 4.4, 4.3, all tested from the
+terminal — then the UI steps 4.2 and 4.5 back to back (still one commit each). A keyword query
 ("government") against real data showed vector-only search ranking noise, and a UI tested on
-that would feel broken for exactly what people type. 4.3 then adds its filters to both halves.
+that would feel broken for exactly what people type. 4.3 adds its filters to both halves.
 
 - [x] **4.1** `/search`: embed query → vector search → ranked results
       · *test:* `npm test` in `server/` — `parseSearch`; the route's refusals and model failures
         (400, 503 retryable, 502) proved never to reach the database; and against real Atlas,
-        on a throwaway 4-dim index: nearest first, the phrase embedded as a *query*, the result
-        shape, an unembedded memory never a result, the limit
+        on a throwaway 4-dim index (replaced at 4.4 by the real indexes): nearest first, the
+        phrase embedded as a *query*, the result shape, an unembedded memory never a result
       · *test:* curl a natural-language query, get sensible hits
       · `GET /search?q=&limit=` — exact nearest neighbours, not approximate (Atlas's advice
         under ~10k documents; no `numCandidates` to tune, and exact under 4.3's pre-filters)
@@ -434,19 +438,29 @@ that would feel broken for exactly what people type. 4.3 then adds its filters t
       · verified by the user with curl against the real collection: results readable. A keyword
         query ("government") ranked the only memory containing the word fourth, the top five
         within 0.003 of each other — rule 5's weakness, exactly as predicted, left to 4.4
-- [~] **4.4** Hybrid search via `$rankFusion` (rule #5) — *moved ahead of 4.2, see above*
+- [x] **4.4** Hybrid search via `$rankFusion` (rule #5) — *moved ahead of 4.2, see above*
+      · *test:* `npm test` in `server/` — against the real indexes, under the test label: a word
+        only one memory holds beats the nearest meaning; **a proper noun ("Qualcomm") beats the
+        pure-vector baseline**; stemming; meaning still wins when no words are shared; a memory
+        with no embedding found by its words; the filter keeping real memories out of *both*
+        halves; the fused score and result shape
       · *test:* a proper-noun query ("Qualcomm") beats the pure-vector baseline
       · *test:* "government" puts the one screenshot containing it first
-- [ ] **4.2** Real search UI, replacing the debug list
-      · *test:* type a query on device, see ranked results
-      · **deletes do not sync**, so the server holds memories the phone has deleted (16 there
-        against 6 on the phone, 2026-09-18). Drop result ids the phone does not hold
-- [ ] **4.3** Flash-Lite query parsing → type and date filters (rule #6)
+      · text index `memories_text` under `lucene.english` (stop words dropped, stemmed); the
+        source app is a token, never text; 4.3's filter fields declared up front
+      · halves weigh the same; each result carries `ranks: {vector, text}`, the "why this
+        matched" for now. Tune the weights with phase 5's corpus, not before
+      · checked by the user with curl against the real collection
+- [~] **4.3** Flash-Lite query parsing → type and date filters (rule #6)
       · *test:* *"screenshot from April"* filters by both type and month
       · *test:* *"that link from WhatsApp"* also finds photos whose caption carried a link
         (filter on `type = LINK OR hasLink`)
       · parsing must also extract a **source app** filter, matched against
         `sourceAppLabel` — provenance is a filter, never mixed into embedded text
+- [ ] **4.2** Real search UI, replacing the debug list
+      · *test:* type a query on device, see ranked results
+      · **deletes do not sync**, so the server holds memories the phone has deleted (16 there
+        against 6 on the phone, 2026-09-18). Drop result ids the phone does not hold
 - [ ] **4.5** Tap a result → open the original artifact
       · *test:* tap a saved screenshot → opens in a viewer
       · *test:* tap a saved PDF → opens in a PDF viewer (originals are app-private, so
