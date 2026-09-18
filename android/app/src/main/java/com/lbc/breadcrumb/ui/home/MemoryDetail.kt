@@ -156,8 +156,9 @@ internal fun ColumnScope.MemoryDetail(
     )
 }
 
+/** The little bar that says a sheet can be pulled down. */
 @Composable
-private fun Grabber(modifier: Modifier) {
+internal fun Grabber(modifier: Modifier) {
     Box(modifier.padding(top = 12.dp, bottom = 10.dp).size(width = 34.dp, height = 4.dp).clip(CircleShape).background(InkGrabber))
 }
 
