@@ -3,6 +3,7 @@ package com.lbc.breadcrumb.open
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
 
@@ -59,6 +60,40 @@ class OriginalsTest {
     @Test
     fun `a note with nothing in it has nothing to hand back`() {
         assertEquals(OriginalAction.Missing, Originals.actionFor(Memory(type = MemoryType.TEXT, rawText = "  "), holding()))
+    }
+
+    // --- sharing onward ------------------------------------------------------------
+
+    @Test
+    fun `a picture or pdf is shared as its file`() {
+        assertEquals(
+            ShareOut.File(stored, "image/jpeg"),
+            Originals.shareFor(Memory(id = "m1", type = MemoryType.IMAGE), holding(stored)),
+        )
+        assertEquals(
+            ShareOut.File(storedPdf, "application/pdf"),
+            Originals.shareFor(Memory(id = "m2", type = MemoryType.PDF), holding(storedPdf)),
+        )
+    }
+
+    @Test
+    fun `a link is shared as its url alone, titled by its page`() {
+        val link = Memory(type = MemoryType.LINK, rawText = "lol look https://example.com/reel/1", title = "A reel about cats")
+
+        assertEquals(ShareOut.Text("https://example.com/reel/1", "A reel about cats"), Originals.shareFor(link, holding()))
+    }
+
+    @Test
+    fun `a note is shared as its words, and never with the note written about it`() {
+        val note = Memory(type = MemoryType.TEXT, rawText = " Naru's, book two weeks ahead ", note = "Priya's pick")
+
+        assertEquals(ShareOut.Text("Naru's, book two weeks ahead"), Originals.shareFor(note, holding()))
+    }
+
+    @Test
+    fun `nothing to send means nothing to share`() {
+        assertNull(Originals.shareFor(Memory(id = "m1", type = MemoryType.IMAGE), holding()))
+        assertNull(Originals.shareFor(Memory(type = MemoryType.TEXT, rawText = " "), holding()))
     }
 
     @Test

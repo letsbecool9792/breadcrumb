@@ -3,6 +3,7 @@ package com.lbc.breadcrumb.open
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -10,6 +11,8 @@ import android.os.Build
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.lbc.breadcrumb.R
+import com.lbc.breadcrumb.capture.MediaReceiverActivity
+import com.lbc.breadcrumb.capture.ShareReceiverActivity
 import com.lbc.breadcrumb.capture.UrlText
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
@@ -32,6 +35,18 @@ sealed interface OriginalAction {
 
     /** Nothing to hand back: the file is gone, or there never was one -- a debug sample, say. */
     data object Missing : OriginalAction
+}
+
+/**
+ * What sharing a memory onward sends (the detail's share button): the thing
+ * itself, as it was saved -- never the app's reading of it, nor the note.
+ */
+sealed interface ShareOut {
+    /** A stored picture or PDF, sent as the file. */
+    data class File(val file: java.io.File, val mimeType: String) : ShareOut
+
+    /** A link's URL, or a note's words. [subject] is a page's title, for apps that use one. */
+    data class Text(val text: String, val subject: String? = null) : ShareOut
 }
 
 object Originals {
@@ -106,4 +121,54 @@ object Originals {
     /** The action for a memory, against the real store. */
     fun actionFor(context: Context, memory: Memory): OriginalAction =
         actionFor(memory, OriginalStore(context)::fileFor)
+
+    /**
+     * What sharing [memory] onward sends, or null when there is nothing to
+     * send -- a file gone, an empty note. A link goes as its URL alone: the
+     * words around it were someone else's message, not the thing.
+     */
+    fun shareFor(memory: Memory, fileFor: (Memory) -> File?): ShareOut? = when (memory.type) {
+        MemoryType.IMAGE, MemoryType.PDF, MemoryType.AUDIO ->
+            fileFor(memory)?.let { ShareOut.File(it, mimeType(memory.type, it.extension)) }
+        MemoryType.LINK -> UrlText.firstUrl(memory.rawText)?.let { ShareOut.Text(it, subject = memory.title) }
+            ?: sharedWords(memory)
+        MemoryType.TEXT -> sharedWords(memory)
+    }
+
+    private fun sharedWords(memory: Memory): ShareOut? =
+        memory.rawText?.trim()?.takeIf { it.isNotEmpty() }?.let { ShareOut.Text(it) }
+
+    fun shareFor(context: Context, memory: Memory): ShareOut? = shareFor(memory, OriginalStore(context)::fileFor)
+
+    /**
+     * The system share sheet for [share]. A file goes as a content URI with a
+     * one-off read grant, as for viewing. Breadcrumb itself is left out of the
+     * sheet: sharing a memory into the app that holds it would only save it twice.
+     */
+    fun shareIntent(context: Context, share: ShareOut): Intent {
+        val send = Intent(Intent.ACTION_SEND)
+        when (share) {
+            is ShareOut.File -> {
+                val uri = FileProvider.getUriForFile(context, authority(context), share.file)
+                send.setType(share.mimeType)
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                // the sheet's own preview reads the file through this
+                send.clipData = ClipData.newRawUri(null, uri)
+            }
+            is ShareOut.Text -> {
+                send.setType("text/plain").putExtra(Intent.EXTRA_TEXT, share.text)
+                share.subject?.let { send.putExtra(Intent.EXTRA_SUBJECT, it).putExtra(Intent.EXTRA_TITLE, it) }
+            }
+        }
+        return Intent.createChooser(send, null).putExtra(
+            Intent.EXTRA_EXCLUDE_COMPONENTS,
+            arrayOf(
+                ComponentName(context, ShareReceiverActivity::class.java),
+                ComponentName(context, MediaReceiverActivity::class.java),
+            ),
+        )
+    }
+
+    fun share(context: Context, share: ShareOut) = start(context, shareIntent(context, share))
 }

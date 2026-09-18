@@ -145,9 +145,11 @@ internal fun ColumnScope.MemoryDetail(
         }
     }
     val haptics = LocalHapticFeedback.current
+    val share = remember(memory) { Originals.shareFor(context, memory) }
     Actions(
         action = action,
         onOpen = { Originals.perform(context, action) },
+        onShare = share?.let { { Originals.share(context, it) } },
         onDelete = {
             haptics.performHapticFeedback(HapticFeedbackType.Confirm)
             onDelete(memory)
@@ -457,11 +459,20 @@ private const val FOUND_TEXT_SHOWN = 1_600
 // --- the one action ----------------------------------------------------------
 
 /**
- * The one action that leaves the app, and beside it, quieter, the one that
- * removes the memory -- a few seconds of undo stand in for a confirmation.
+ * The one action that leaves the app, and beside it, quieter, sending the
+ * thing on to someone -- a memory is often found in order to be passed on --
+ * and removing it, where a few seconds of undo stand in for a confirmation.
+ *
+ * @param onShare null when there is nothing to send: the file is gone, the note empty.
  */
 @Composable
-private fun Actions(action: OriginalAction, onOpen: () -> Unit, onDelete: () -> Unit, modifier: Modifier = Modifier) {
+private fun Actions(
+    action: OriginalAction,
+    onOpen: () -> Unit,
+    onShare: (() -> Unit)?,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val enabled = action != OriginalAction.Missing
     val label = stringResource(
         when (action) {
@@ -495,18 +506,37 @@ private fun Actions(action: OriginalAction, onOpen: () -> Unit, onDelete: () -> 
             }
         }
 
-        val delete = stringResource(R.string.detail_delete)
-        Box(
-            Modifier
-                .size(52.dp)
-                .clip(CircleShape)
-                .background(InkElevated)
-                .clickable(onClick = onDelete)
-                .semantics { contentDescription = delete },
-            contentAlignment = Alignment.Center,
-        ) {
-            Bin(BoneDim)
-        }
+        onShare?.let { RoundAction(stringResource(R.string.detail_share), it) { ShareMark(BoneDim) } }
+        RoundAction(stringResource(R.string.detail_delete), onDelete) { Bin(BoneDim) }
+    }
+}
+
+@Composable
+private fun RoundAction(label: String, onClick: () -> Unit, glyph: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(InkElevated)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        glyph()
+    }
+}
+
+/** Sharing, as Android draws it: three points joined, one fanning out to two. */
+@Composable
+private fun ShareMark(color: Color) {
+    Canvas(Modifier.size(18.dp)) {
+        val u = size.width / 16f
+        val from = Offset(4f * u, 8f * u)
+        val top = Offset(12f * u, 3.5f * u)
+        val bottom = Offset(12f * u, 12.5f * u)
+        drawLine(color, from, top, strokeWidth = 1.4f * u, cap = StrokeCap.Round)
+        drawLine(color, from, bottom, strokeWidth = 1.4f * u, cap = StrokeCap.Round)
+        listOf(from, top, bottom).forEach { drawCircle(color, radius = 2.1f * u, center = it) }
     }
 }
 

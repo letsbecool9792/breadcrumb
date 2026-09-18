@@ -1,8 +1,11 @@
 package com.lbc.breadcrumb.open
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.content.FileProvider
+import androidx.core.content.IntentCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.lbc.breadcrumb.data.Memory
@@ -88,6 +91,25 @@ class OriginalsProviderTest {
         } finally {
             cached.delete()
         }
+    }
+
+    @Test
+    fun sharingOnwardSendsTheFileReadableAndLeavesBreadcrumbOutOfTheSheet() {
+        val chooser = Originals.shareIntent(context, ShareOut.File(original, "image/png"))
+        val send = IntentCompat.getParcelableExtra(chooser, Intent.EXTRA_INTENT, Intent::class.java)!!
+        val uri = IntentCompat.getParcelableExtra(send, Intent.EXTRA_STREAM, Uri::class.java)!!
+
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        assertEquals(Intent.ACTION_SEND, send.action)
+        assertEquals("image/png", send.type)
+        assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+        assertEquals(0, send.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        assertArrayEquals(bytes, context.contentResolver.openInputStream(uri)!!.use { it.readBytes() })
+        // sharing into the app that holds it would only save it twice
+        @Suppress("DEPRECATION")
+        val excluded = chooser.getParcelableArrayExtra(Intent.EXTRA_EXCLUDE_COMPONENTS)!!.map { (it as ComponentName).className }
+        assertTrue(excluded.contains("com.lbc.breadcrumb.capture.ShareReceiverActivity"))
+        assertTrue(excluded.contains("com.lbc.breadcrumb.capture.MediaReceiverActivity"))
     }
 
     @Test
