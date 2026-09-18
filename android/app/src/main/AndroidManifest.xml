@@ -48,7 +48,9 @@
              taskAffinity keep it out of the recents list and off the back
              stack, so it never appears to be "the app" the user opened.
              Every capture activity handles its own config changes: a rotation
-             mid-save would otherwise recreate it and drop the capture sheet. -->
+             mid-save would otherwise recreate it and drop the capture sheet.
+             adjustResize on each, so the sheet rides up on the keyboard while
+             a note is written. -->
         <activity
             android:name=".capture.ShareReceiverActivity"
             android:exported="true"
@@ -57,6 +59,7 @@
             android:taskAffinity=""
             android:label="@string/app_name"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Breadcrumb.Capture">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -91,6 +94,7 @@
             android:taskAffinity=""
             android:label="@string/app_name"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Breadcrumb.Capture">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -114,6 +118,7 @@
             android:taskAffinity=""
             android:label="@string/app_name"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Breadcrumb.Capture" />
 
         <!-- Hands a stored original to the app that opens it (step 4.5).

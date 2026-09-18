@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 class BreadcrumbApp : Application() {
 
@@ -26,6 +27,14 @@ class BreadcrumbApp : Application() {
 
     /** Lazy: a capture process never talks to the server, so never builds a client. */
     val server: ServerClient by lazy { ServerClient(BuildConfig.SERVER_URL) }
+
+    /**
+     * Memories the upload queue must leave for now: saved, but with their
+     * capture sheet still open, where a note may yet be written. Sending them
+     * first would mean sending them twice. In memory only -- if the process
+     * dies, so did the sheet, and there is nothing left to wait for.
+     */
+    val uploadHolds: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     override fun onCreate() {
         super.onCreate()

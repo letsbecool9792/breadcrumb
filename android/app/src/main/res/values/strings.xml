@@ -13,6 +13,8 @@
     <string name="capture_close">Close</string>
     <string name="capture_more">+%1$d</string>
     <string name="capture_document">Document</string>
+    <string name="capture_add_note">add a note</string>
+    <string name="capture_note_hint">who sent it, what it\'s for…</string>
 
     <string name="tile_label">Breadcrumb</string>
     <string name="tile_subtitle">Save clipboard</string>

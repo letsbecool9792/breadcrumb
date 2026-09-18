@@ -28,6 +28,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             dao = BreadcrumbDatabase.get(applicationContext).memoryDao(),
             api = app.server,
             store = OriginalStore(applicationContext),
+            held = { app.uploadHolds },
         )
 
         // Deletes first: nothing else needs to wait on them, and a memory

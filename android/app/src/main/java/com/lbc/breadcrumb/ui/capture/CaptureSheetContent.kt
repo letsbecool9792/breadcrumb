@@ -18,15 +18,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -61,10 +71,14 @@ private val CardShape = RoundedCornerShape(16.dp)
 @Composable
 internal fun CaptureSheetContent(
     state: CaptureUiState,
+    note: String,
+    onNoteChange: (String) -> Unit,
     onUndo: () -> Unit,
     onDone: () -> Unit,
 ) {
     val saved = (state as? CaptureUiState.Saved)?.memories.orEmpty()
+    // opened on a tap, never on its own: saving stays one tap, the note optional
+    var writing by remember { mutableStateOf(false) }
 
     Column(
         // Grows smoothly from "Saving…" to the full preview instead of jumping.
@@ -75,7 +89,9 @@ internal fun CaptureSheetContent(
 
         when (state) {
             is CaptureUiState.Saved -> {
-                CaptureSummary.previewFor(saved)?.let { Preview(it) }
+                // smaller while the keyboard is up, so the sheet still fits above it
+                CaptureSummary.previewFor(saved)?.let { Preview(it, compact = writing) }
+                NoteField(note, writing, onOpen = { writing = true }, onNoteChange = onNoteChange)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SheetButton(stringResource(R.string.capture_undo), primary = false, onClick = onUndo, modifier = Modifier.weight(1f))
                     SheetButton(stringResource(R.string.capture_done), primary = true, onClick = onDone, modifier = Modifier.weight(1f))
@@ -131,13 +147,67 @@ private fun title(state: CaptureUiState): String = when (state) {
 }
 
 @Composable
-private fun Preview(preview: CapturePreview) {
+private fun Preview(preview: CapturePreview, compact: Boolean) {
     when (preview) {
-        is CapturePreview.Photo -> PhotoPreview(preview)
+        is CapturePreview.Photo -> PhotoPreview(preview, compact)
         is CapturePreview.Files -> FilesPreview(preview)
         is CapturePreview.Document -> DocumentPreview(preview)
         is CapturePreview.Link -> LinkPreview(preview)
-        is CapturePreview.Note -> NotePreview(preview)
+        is CapturePreview.Note -> NotePreview(preview, compact)
+    }
+}
+
+// --- the note ------------------------------------------------------------------
+
+/**
+ * The person's own line about what they kept -- who sent it, what it is for.
+ * A quiet "add a note" until tapped; then a field, with the keyboard up.
+ */
+@Composable
+private fun NoteField(note: String, writing: Boolean, onOpen: () -> Unit, onNoteChange: (String) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    if (!writing) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onOpen)
+                .padding(vertical = 4.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("+", fontFamily = Mono, fontSize = 15.sp, color = colors.primary)
+            Text(
+                text = stringResource(R.string.capture_add_note),
+                fontFamily = Mono,
+                fontSize = 12.sp,
+                color = colors.outline,
+            )
+        }
+        return
+    }
+
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(CardShape)
+            .background(colors.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        val style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 21.sp)
+        if (note.isEmpty()) {
+            Text(stringResource(R.string.capture_note_hint), style = style.copy(color = colors.outline))
+        }
+        BasicTextField(
+            value = note,
+            onValueChange = onNoteChange,
+            textStyle = style.copy(color = colors.onSurface),
+            cursorBrush = SolidColor(colors.primary),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            maxLines = 5,
+            modifier = Modifier.fillMaxWidth().focusRequester(focus),
+        )
     }
 }
 
@@ -145,9 +215,10 @@ private fun Preview(preview: CapturePreview) {
 
 private val PhotoMinHeight = 160.dp
 private val PhotoMaxHeight = 300.dp
+private val PhotoCompactHeight = 110.dp
 
 @Composable
-private fun PhotoPreview(preview: CapturePreview.Photo) {
+private fun PhotoPreview(preview: CapturePreview.Photo, compact: Boolean) {
     val colors = MaterialTheme.colorScheme
     val original = rememberOriginal(preview.memory, targetPx = 900)
 
@@ -156,10 +227,10 @@ private fun PhotoPreview(preview: CapturePreview.Photo) {
             val bitmap = original?.thumbnail
             // Follow the photo's own shape, within limits: a landscape shot stays
             // wide, a tall screenshot is capped rather than filling the screen.
-            val height = if (bitmap == null) {
-                220.dp
-            } else {
-                (maxWidth * (bitmap.height.toFloat() / bitmap.width)).coerceIn(PhotoMinHeight, PhotoMaxHeight)
+            val height = when {
+                compact -> PhotoCompactHeight
+                bitmap == null -> 220.dp
+                else -> (maxWidth * (bitmap.height.toFloat() / bitmap.width)).coerceIn(PhotoMinHeight, PhotoMaxHeight)
             }
 
             Box(
@@ -183,7 +254,7 @@ private fun PhotoPreview(preview: CapturePreview.Photo) {
             }
         }
 
-        preview.caption?.let {
+        preview.caption?.takeIf { !compact }?.let {
             Text(
                 text = it,
                 fontSize = 14.sp,
@@ -336,7 +407,7 @@ private fun LinkPreview(preview: CapturePreview.Link) {
 // --- note --------------------------------------------------------------------
 
 @Composable
-private fun NotePreview(preview: CapturePreview.Note) {
+private fun NotePreview(preview: CapturePreview.Note, compact: Boolean) {
     val colors = MaterialTheme.colorScheme
     Box(Modifier.fillMaxWidth().clip(CardShape).background(colors.surfaceVariant).padding(16.dp)) {
         Text(
@@ -344,7 +415,7 @@ private fun NotePreview(preview: CapturePreview.Note) {
             fontSize = 16.sp,
             lineHeight = 23.sp,
             color = colors.onSurface,
-            maxLines = 6,
+            maxLines = if (compact) 2 else 6,
             overflow = TextOverflow.Ellipsis,
         )
     }

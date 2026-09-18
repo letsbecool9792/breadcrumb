@@ -126,17 +126,39 @@ class MemoryUploaderTest {
         syncState = state,
     ).also { dao.upsert(it) }
 
-    private fun uploader(now: Long = 10_000, batchSize: Int = 2) = MemoryUploader(
-        dao = dao,
-        api = api,
-        store = store,
-        batchSize = batchSize,
-        imageBatchSize = 2,
-        ocrGraceMillis = 1_000,
-        clock = { now },
-        // the bitmap work is ImageForUpload's, and has its own tests
-        prepareImage = { file -> if (file.exists()) file.readBytes() else null },
-    )
+    private fun uploader(now: Long = 10_000, batchSize: Int = 2, held: () -> Collection<String> = { emptySet() }) =
+        MemoryUploader(
+            dao = dao,
+            api = api,
+            store = store,
+            batchSize = batchSize,
+            imageBatchSize = 2,
+            ocrGraceMillis = 1_000,
+            clock = { now },
+            // the bitmap work is ImageForUpload's, and has its own tests
+            prepareImage = { file -> if (file.exists()) file.readBytes() else null },
+            held = held,
+        )
+
+    @Test
+    fun aMemoryWhoseSheetIsStillOpenWaits() = runBlocking {
+        saved("open", capturedAt = 1_000)
+        saved("closed", capturedAt = 2_000)
+        saved("closed-too", capturedAt = 3_000)
+        val holds = mutableSetOf("open")
+
+        // batches of one, so the held memory is passed over batch after batch without spinning
+        val first = uploader(batchSize = 1, held = { holds }).uploadPending()
+
+        assertEquals(UploadOutcome.Done(2), first)
+        assertEquals(listOf("closed", "closed-too"), sent)
+        assertEquals(SyncState.PENDING, dao.getById("open")!!.syncState)
+
+        // the sheet closed, and a note may have been written: now it goes, once
+        holds.clear()
+        uploader(held = { holds }).uploadPending()
+        assertEquals(listOf("closed", "closed-too", "open"), sent)
+    }
 
     /** An image saved with its file copied in, before OCR has read it. */
     private suspend fun savedImage(id: String, capturedAt: Long): Memory = Memory(

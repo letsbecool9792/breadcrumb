@@ -44,6 +44,12 @@ class MemoryUploader(
     private val clock: () -> Long = System::currentTimeMillis,
     /** Injected so the queue's bookkeeping can be tested without decoding bitmaps. */
     private val prepareImage: (File) -> ByteArray? = { ImageForUpload.prepare(it) },
+    /**
+     * Memories not to send yet: those whose capture sheet is still open, since
+     * a note written there would otherwise cost a second send. Read afresh
+     * for every batch, so one released mid-run goes in the same run.
+     */
+    private val held: () -> Collection<String> = { emptySet() },
 ) {
 
     /**
@@ -109,7 +115,11 @@ class MemoryUploader(
 
         var sent = 0
         while (true) {
-            val batch = dao.pendingUploads(ocrDeadline = clock() - ocrGraceMillis, limit = batchSize)
+            val batch = dao.pendingUploads(
+                ocrDeadline = clock() - ocrGraceMillis,
+                exclude = held().toList(),
+                limit = batchSize,
+            )
             if (batch.isEmpty()) return UploadOutcome.Done(sent)
 
             // Claimed by nobody else, and still PENDING: anything that changed

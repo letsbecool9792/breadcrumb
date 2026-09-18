@@ -38,6 +38,13 @@ abstract class CaptureActivity : ComponentActivity() {
     private var saved: List<Memory> = emptyList()
     private var pendingWrite: Job? = null
 
+    /** What the person has typed as a note, if anything. Written to the memories when the sheet goes. */
+    private val note = mutableStateOf("")
+    private var writtenNote = ""
+
+    /** Held back from the upload queue until the sheet goes, so a note costs no second send. */
+    private var held: List<String> = emptyList()
+
     protected val app: BreadcrumbApp get() = application as BreadcrumbApp
     protected val dao: MemoryDao by lazy { BreadcrumbDatabase.get(this).memoryDao() }
     protected val store: OriginalStore by lazy { OriginalStore(applicationContext) }
@@ -62,6 +69,8 @@ abstract class CaptureActivity : ComponentActivity() {
             BreadcrumbTheme {
                 CaptureSheet(
                     state = state.value,
+                    note = note.value,
+                    onNoteChange = { note.value = it },
                     onUndo = ::undo,
                     onFinished = ::finishInvisibly,
                 )
@@ -89,6 +98,7 @@ abstract class CaptureActivity : ComponentActivity() {
      */
     private fun finishInvisibly() {
         if (isFinishing) return
+        release()
         val decor = window.decorView
 
         window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
@@ -111,9 +121,45 @@ abstract class CaptureActivity : ComponentActivity() {
         pendingWrite = write
         state.value = CaptureUiState.Saved(memories, attempted)
 
-        // Asks only; WorkManager decides when. Undo can still beat it, and the
-        // worker skips rows that are gone by the time it looks.
-        if (memories.isNotEmpty()) UploadWorker.schedule(applicationContext)
+        // Not sent while the sheet is up: a note written there would mean
+        // sending everything twice. OCR asking for a pass meanwhile is fine --
+        // the queue passes these over until [release].
+        held = memories.map { it.id }
+        app.uploadHolds += held
+    }
+
+    /**
+     * Leaving the sheet -- dismissed, or the person went elsewhere: writes the
+     * note, lets the memories go to the upload queue, and asks for a pass.
+     * Safe to call more than once; a note changed after coming back is
+     * written again, and sends the memories again.
+     */
+    private fun release() {
+        val memories = saved
+        val text = note.value.trim()
+        val write = pendingWrite
+        val ids = held
+        held = emptyList()
+        val noteChanged = text != writtenNote
+        writtenNote = text
+        if (ids.isEmpty() && !noteChanged) return
+
+        app.applicationScope.launch {
+            // the rows must exist before a note can be written to them
+            write?.join()
+            if (noteChanged) {
+                val now = System.currentTimeMillis()
+                memories.forEach { dao.setNote(it.id, text.ifEmpty { null }, now) }
+            }
+            app.uploadHolds -= ids.toSet()
+            if (memories.isNotEmpty()) UploadWorker.schedule(applicationContext)
+        }
+    }
+
+    /** Gone to another app with the sheet still up: what is there so far is kept and sent. */
+    override fun onStop() {
+        super.onStop()
+        release()
     }
 
     protected fun showFailed(@StringRes message: Int) {

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -69,6 +70,9 @@ private const val SCRIM_ALPHA = 0.62f
 @Composable
 fun CaptureSheet(
     state: CaptureUiState,
+    /** A note the person is writing about what they saved; empty for none. */
+    note: String,
+    onNoteChange: (String) -> Unit,
     onUndo: () -> Unit,
     onFinished: () -> Unit,
 ) {
@@ -122,6 +126,8 @@ fun CaptureSheet(
         ) {
             CaptureSheetContent(
                 state = state,
+                note = note,
+                onNoteChange = onNoteChange,
                 onUndo = onUndo,
                 onDone = ::dismiss,
             )
@@ -164,6 +170,9 @@ private fun SheetSurface(
             .background(colors.surface)
             .drawBehind { drawTopEdge(colors.outlineVariant) }
             .navigationBarsPadding()
+            // rides up on the keyboard while a note is written; the nav bar's
+            // share of the keyboard's height is already taken, so not twice
+            .imePadding()
             .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 16.dp),
     ) {
         Box(Modifier.fillMaxWidth().padding(bottom = 14.dp), contentAlignment = Alignment.Center) {
