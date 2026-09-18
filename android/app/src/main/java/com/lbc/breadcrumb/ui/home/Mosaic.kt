@@ -77,6 +77,8 @@ internal fun Mosaic(
     memories: List<Memory>?,
     now: Long,
     kept: String,
+    /** Held by the screen, so the mosaic keeps its place across a search. */
+    grid: LazyStaggeredGridState,
     onOpenDebug: (() -> Unit)?,
     onOpen: (Memory) -> Unit,
 ) {
@@ -90,7 +92,6 @@ internal fun Mosaic(
         return
     }
 
-    val grid = rememberLazyStaggeredGridState()
     var mastheadHeight by remember { mutableIntStateOf(0) }
     val collapse by remember {
         derivedStateOf { mastheadCollapse(grid.firstVisibleItemIndex, grid.firstVisibleItemScrollOffset, mastheadHeight) }
