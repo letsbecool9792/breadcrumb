@@ -12,10 +12,14 @@ import com.lbc.breadcrumb.BreadcrumbApp
 import com.lbc.breadcrumb.data.BreadcrumbDatabase
 import com.lbc.breadcrumb.data.FtsQuery
 import com.lbc.breadcrumb.data.Memory
+import com.lbc.breadcrumb.data.OriginalStore
+import com.lbc.breadcrumb.data.SyncState
 import com.lbc.breadcrumb.net.Interpretation
 import com.lbc.breadcrumb.net.SearchHit
 import com.lbc.breadcrumb.net.SearchOutcome
 import com.lbc.breadcrumb.sync.UploadWorker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,6 +28,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** A result on screen: the phone's own row, and what the server said about it when it ranked it. */
 data class Result(val memory: Memory, val hit: SearchHit?)
@@ -85,6 +91,17 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     var opened by mutableStateOf<Result?>(null)
         private set
 
+    /** A memory just deleted, while it can still be brought back (4.6). */
+    var removed by mutableStateOf<Memory?>(null)
+        private set
+
+    private val store = OriginalStore(app)
+    private val appScope = (app as BreadcrumbApp).applicationScope
+    private var finishing: Job? = null
+
+    /** Deletes and restores run in the order they were asked for, whatever the threads do. */
+    private val writes = Mutex()
+
     init {
         // Catch-up: anything left queued by an earlier run, or saved offline,
         // goes out as soon as there is a network.
@@ -116,6 +133,64 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** One memory, live -- an open detail shows its summary the moment it is copied back. */
     fun observe(id: String): Flow<Memory?> = dao.observeById(id)
+
+    /**
+     * Deletes a memory at once, with a few seconds to take it back.
+     *
+     * The row goes now, with the delete remembered for the server, so it
+     * leaves the mosaic and the results immediately. The original file stays
+     * until the undo has passed, so undo brings back everything.
+     */
+    fun delete(memory: Memory) {
+        opened = null
+        // a second delete makes the first one final
+        finishing?.cancel()
+        removed?.let(::finish)
+
+        removed = memory
+        (search as? SearchState.Searching)?.let { shown ->
+            search = shown.copy(results = shown.results.filterNot { it.memory.id == memory.id })
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            writes.withLock { dao.deleteEverywhere(memory, System.currentTimeMillis()) }
+        }
+        finishing = viewModelScope.launch {
+            delay(UNDO_MS)
+            removed = null
+            finish(memory)
+        }
+    }
+
+    /**
+     * Brings back the memory just deleted. As PENDING: the server may already
+     * have deleted it, and sending it again costs nothing if it has not.
+     */
+    fun undo() {
+        val memory = removed ?: return
+        finishing?.cancel()
+        removed = null
+        viewModelScope.launch(Dispatchers.IO) {
+            writes.withLock { dao.restore(memory.copy(syncState = SyncState.PENDING)) }
+            UploadWorker.schedule(getApplication())
+        }
+    }
+
+    /**
+     * Past undoing: the original file goes, and the delete goes to the
+     * server. On the app's scope, so leaving the screen cannot cut it short.
+     */
+    private fun finish(memory: Memory) {
+        appScope.launch {
+            store.delete(memory)
+            UploadWorker.schedule(getApplication())
+        }
+    }
+
+    override fun onCleared() {
+        // leaving mid-undo makes the delete final
+        removed?.let(::finish)
+        super.onCleared()
+    }
 
     private suspend fun run(phrase: String) {
         if (phrase.isEmpty()) {
@@ -154,6 +229,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
         /** Long enough to span a word being typed, short enough to feel like search-as-you-type. */
         const val PAUSE_MS = 450L
+
+        /** How long a delete can be taken back. */
+        const val UNDO_MS = 5_000L
 
         const val LIMIT = 30
 

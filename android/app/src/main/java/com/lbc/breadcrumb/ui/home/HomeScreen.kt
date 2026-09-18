@@ -1,6 +1,12 @@
 package com.lbc.breadcrumb.ui.home
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,7 +34,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lbc.breadcrumb.R
+import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.ui.common.CrumbTrail
 import com.lbc.breadcrumb.ui.theme.AmberContainerDark
 import com.lbc.breadcrumb.ui.theme.AmberBright
@@ -115,6 +125,7 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
                 .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            UndoBar(removed = viewModel.removed, onUndo = viewModel::undo)
             SearchField(
                 query = viewModel.query,
                 onQueryChange = viewModel::onQueryChange,
@@ -132,7 +143,50 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
             memory = live ?: opened.memory,
             now = now,
             onDismiss = viewModel::close,
+            onDelete = viewModel::delete,
         )
+    }
+}
+
+/** A delete, for the few seconds it can still be taken back. */
+@Composable
+private fun UndoBar(removed: Memory?, onUndo: () -> Unit) {
+    // the last memory stays drawn while the bar slides away
+    var shown by remember { mutableStateOf<Memory?>(null) }
+    if (removed != null) shown = removed
+
+    AnimatedVisibility(
+        visible = removed != null,
+        enter = fadeIn(tween(160)) + slideInVertically(tween(220)) { it / 2 },
+        exit = fadeOut(tween(200)) + slideOutVertically(tween(240)) { it / 2 },
+    ) {
+        val memory = shown ?: return@AnimatedVisibility
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .clip(RoundedCornerShape(23.dp))
+                .background(InkElevated)
+                .border(1.dp, InkFieldBorder, RoundedCornerShape(23.dp))
+                .padding(start = 18.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "${stringResource(R.string.undo_deleted)} · ${ResultText.title(memory, memory.summary).lowercase()}",
+                style = TextStyle(fontFamily = MonoFamily, fontSize = 12.sp, color = BoneDim),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.undo_action),
+                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AmberBright),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(18.dp))
+                    .clickable(onClick = onUndo)
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+            )
+        }
     }
 }
 

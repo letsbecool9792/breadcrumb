@@ -42,4 +42,7 @@
     <string name="detail_seen">what it shows</string>
     <string name="detail_copied">Copied</string>
     <string name="detail_no_app">No app here can open this</string>
+    <string name="detail_delete">Delete</string>
+    <string name="undo_deleted">deleted</string>
+    <string name="undo_action">Undo</string>
 </resources>

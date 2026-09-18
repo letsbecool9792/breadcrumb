@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,12 +43,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.lbc.breadcrumb.R
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
@@ -83,10 +87,12 @@ internal fun MemoryDetail(
     memory: Memory,
     now: Long,
     onDismiss: () -> Unit,
+    onDelete: (Memory) -> Unit,
 ) {
     val context = LocalContext.current
     val action = remember(memory) { Originals.actionFor(context, memory) }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
     // a search's answer is the freshest; the phone's copy covers a memory opened from the mosaic
     val summary = result.hit?.summary ?: memory.summary
     val readText = result.hit?.readText ?: memory.readText
@@ -121,7 +127,12 @@ internal fun MemoryDetail(
                     FoundText(memory, readText)
                 }
             }
-            Actions(action = action, onOpen = { Originals.perform(context, action) })
+            Actions(
+                action = action,
+                onOpen = { Originals.perform(context, action) },
+                // the sheet leaves first, then the memory
+                onDelete = { scope.launch { sheet.hide() }.invokeOnCompletion { onDelete(memory) } },
+            )
         }
     }
 }
@@ -307,9 +318,12 @@ private fun FoundText(memory: Memory, readText: String?) {
 
 // --- the one action ----------------------------------------------------------
 
-/** The one action, and it leaves the app. */
+/**
+ * The one action that leaves the app, and beside it, quieter, the one that
+ * removes the memory -- a few seconds of undo stand in for a confirmation.
+ */
 @Composable
-private fun Actions(action: OriginalAction, onOpen: () -> Unit) {
+private fun Actions(action: OriginalAction, onOpen: () -> Unit, onDelete: () -> Unit) {
     val enabled = action != OriginalAction.Missing
     val label = stringResource(
         when (action) {
@@ -342,6 +356,49 @@ private fun Actions(action: OriginalAction, onOpen: () -> Unit) {
                 LeavesTheApp(ink)
             }
         }
+
+        val delete = stringResource(R.string.detail_delete)
+        Box(
+            Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .background(InkElevated)
+                .clickable(onClick = onDelete)
+                .semantics { contentDescription = delete },
+            contentAlignment = Alignment.Center,
+        ) {
+            Bin(BoneDim)
+        }
+    }
+}
+
+/** A bin: lid, handle, and a body narrowing to its foot. */
+@Composable
+private fun Bin(color: Color) {
+    Canvas(Modifier.size(18.dp)) {
+        val u = size.width / 16f
+        val stroke = Stroke(width = 1.5f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        drawLine(color, Offset(2.5f * u, 4f * u), Offset(13.5f * u, 4f * u), strokeWidth = 1.5f * u, cap = StrokeCap.Round)
+        drawPath(
+            Path().apply {
+                moveTo(6f * u, 4f * u)
+                lineTo(6.5f * u, 2f * u)
+                lineTo(9.5f * u, 2f * u)
+                lineTo(10f * u, 4f * u)
+            },
+            color,
+            style = stroke,
+        )
+        drawPath(
+            Path().apply {
+                moveTo(3.8f * u, 4f * u)
+                lineTo(4.8f * u, 14f * u)
+                lineTo(11.2f * u, 14f * u)
+                lineTo(12.2f * u, 4f * u)
+            },
+            color,
+            style = stroke,
+        )
     }
 }
 
