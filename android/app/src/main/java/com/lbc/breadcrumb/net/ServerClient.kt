@@ -345,6 +345,8 @@ private data class MemoryPayload(
     val title: String? = null,
     val rawText: String? = null,
     val extractedText: String? = null,
+    /** Embedded and word-indexed on the server, never read by its model. */
+    val note: String? = null,
 ) {
     companion object {
         fun of(memory: Memory) = MemoryPayload(
@@ -359,6 +361,7 @@ private data class MemoryPayload(
             title = memory.title,
             rawText = memory.rawText,
             extractedText = memory.extractedText,
+            note = memory.note,
         )
     }
 }
