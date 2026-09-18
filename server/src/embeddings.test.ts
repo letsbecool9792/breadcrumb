@@ -51,6 +51,13 @@ describe("embeddingText", () => {
     assert.ok(text.includes("https://example.com/jobs/qualcomm-swe-intern"));
   });
 
+  test("the person's note is embedded near the front, after what the thing is called", () => {
+    const text = embeddingText({ ...memory, note: "Priya's pick for the summer" });
+
+    const lines = text.split("\n");
+    assert.equal(lines.indexOf("Priya's pick for the summer"), lines.indexOf(memory.title) + 1);
+  });
+
   test("an unenriched memory still has its own text to embed", () => {
     const text = embeddingText({ title: null, rawText: "Naru's in Indiranagar", extractedText: null });
 

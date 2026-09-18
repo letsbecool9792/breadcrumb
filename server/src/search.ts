@@ -88,8 +88,10 @@ export interface SearchHit {
   title: string | null;
   /** What was shared: the link, the text, a photo's caption. */
   rawText: string | null;
-  /** What on-device OCR read in a picture. */
+  /** What the phone read out of it: a picture's words, a PDF's text, a link's page. */
   extractedText: string | null;
+  /** The person's own words about it. */
+  note: string | null;
   /** What the model saw in a picture OCR could barely read (step 3.6). */
   readText: string | null;
   /** Gemini's one line about it -- the most a result says about why it matched. */
@@ -184,6 +186,7 @@ const RESULT_FIELDS = {
   title: 1,
   rawText: 1,
   extractedText: 1,
+  note: 1,
   "enrichment.readText": 1,
   "enrichment.summary": 1,
   "enrichment.kind": 1,
@@ -245,7 +248,16 @@ function textFilter(filter: SearchFilter) {
 
 type Projected = Pick<
   MemoryDoc,
-  "_id" | "type" | "hasLink" | "capturedAt" | "datedAt" | "sourceAppLabel" | "title" | "rawText" | "extractedText"
+  | "_id"
+  | "type"
+  | "hasLink"
+  | "capturedAt"
+  | "datedAt"
+  | "sourceAppLabel"
+  | "title"
+  | "rawText"
+  | "extractedText"
+  | "note"
 > & {
   enrichment?: { summary?: string; kind?: string; readText?: string };
   score?: number;
@@ -324,6 +336,7 @@ function toHit(doc: Projected): SearchHit {
     title: doc.title ?? null,
     rawText: doc.rawText ?? null,
     extractedText: doc.extractedText ?? null,
+    note: doc.note ?? null,
     readText: doc.enrichment?.readText || null,
     summary: doc.enrichment?.summary || null,
     kind: doc.enrichment?.kind || null,
