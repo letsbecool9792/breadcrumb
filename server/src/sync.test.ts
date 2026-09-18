@@ -6,7 +6,7 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import type { Db } from "mongodb";
 import { createApp } from "./app.ts";
 import { closeMongo, connectMongo, databaseName, db } from "./db.ts";
-import { type MemoryDoc, memories, putMemories } from "./memories.ts";
+import { getMemory, type MemoryDoc, memories, putMemories } from "./memories.ts";
 import { MAX_IDS, parseIds } from "./sync.ts";
 
 describe("parseIds", () => {
@@ -29,7 +29,7 @@ describe("parseIds", () => {
   });
 });
 
-/** How the phone keeps in step with what the server holds (step 4.6). */
+/** The phone's two ways of keeping in step with what the server holds (step 4.6). */
 describe(
   "keeping the phone in step",
   { skip: process.env.MONGODB_URI ? false : "MONGODB_URI is not set (copy .env.example to .env)" },
@@ -124,10 +124,35 @@ describe(
       assert.ok(!JSON.stringify(body).includes("0.6"), "the vector must not be sent back");
     });
 
-    test("a bad list is refused", async () => {
-      const { status } = await post("/memories/enrichment", { ids: [] });
+    test("a delete on the phone deletes the memory here", async () => {
+      await putMemories(database, [doc("gone"), doc("kept")]);
+
+      const { status, body } = await post("/memories/delete", { ids: ["gone"] });
+
+      assert.equal(status, 200);
+      assert.equal(body["deleted"], 1);
+      assert.equal(await getMemory(database, "gone"), null);
+      assert.ok(await getMemory(database, "kept"), "only what was asked for is deleted");
+    });
+
+    test("sending the same delete again is harmless", async () => {
+      await putMemories(database, [doc("gone")]);
+      await post("/memories/delete", { ids: ["gone"] });
+
+      // the phone retries when it never heard the first answer
+      const { status, body } = await post("/memories/delete", { ids: ["gone", "never-sent"] });
+
+      assert.equal(status, 200);
+      assert.equal(body["deleted"], 0);
+    });
+
+    test("a bad list is refused and deletes nothing", async () => {
+      await putMemories(database, [doc("kept")]);
+
+      const { status } = await post("/memories/delete", { ids: [] });
 
       assert.equal(status, 400);
+      assert.equal(await memories(database).countDocuments(), 1);
     });
   },
 );

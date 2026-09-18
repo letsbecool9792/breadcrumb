@@ -7,7 +7,7 @@ import { ingestImages, parseImages } from "./images.ts";
 import { type IncomingMemory, ingest, parseMemory } from "./ingest.ts";
 import { type QueryParser, understanding } from "./query.ts";
 import { answerSearch, parseSearch } from "./search.ts";
-import { enrichmentFor, parseIds } from "./sync.ts";
+import { deleteMemories, enrichmentFor, parseIds } from "./sync.ts";
 
 /** One request's worth of memories. The phone sends ten; this is the ceiling. */
 const MAX_BATCH = 50;
@@ -33,7 +33,7 @@ export interface AppOptions {
 /**
  * The HTTP surface, built without listening so tests can serve it on any
  * port. Stays thin: health, ingest, search, and keeping the phone in step --
- * what the model made of a memory.
+ * what the model made of a memory, and deletes.
  */
 export function createApp({ log = true, extract, embed, extractImages, parseQuery, database }: AppOptions) {
   const app = express();
@@ -114,6 +114,17 @@ export function createApp({ log = true, extract, embed, extractImages, parseQuer
       return;
     }
     res.json({ results: await enrichmentFor(database ?? db(), parsed.ids) });
+  });
+
+  // Memories deleted on the phone. A delete that stayed on the phone would
+  // leave the text and its vector in the cloud, searchable by nobody.
+  app.post("/memories/delete", express.json({ limit: "64kb" }), async (req, res) => {
+    const parsed = parseIds(req.body);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    res.json({ deleted: await deleteMemories(database ?? db(), parsed.ids) });
   });
 
   // A ranked list of memories, never an answer: each result is a way back to

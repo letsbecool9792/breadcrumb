@@ -51,3 +51,14 @@ export async function enrichmentFor(database: Db, ids: string[]): Promise<Enrich
     readText: doc.enrichment?.readText || null,
   }));
 }
+
+/**
+ * Deletes memories deleted on the phone (step 4.6): the text, the enrichment
+ * and the vector all go, and the search indexes follow within a moment.
+ * Idempotent -- an id already gone, or never sent, is simply not counted -- so
+ * the phone can send the same delete again after a failure.
+ */
+export async function deleteMemories(database: Db, ids: string[]): Promise<number> {
+  const result = await memories(database).deleteMany({ _id: { $in: ids } });
+  return result.deletedCount;
+}
