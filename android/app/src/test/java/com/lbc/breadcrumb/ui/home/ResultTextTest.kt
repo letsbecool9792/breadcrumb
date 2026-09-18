@@ -2,6 +2,7 @@ package com.lbc.breadcrumb.ui.home
 
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
+import com.lbc.breadcrumb.data.SyncState
 import com.lbc.breadcrumb.net.Interpretation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -16,6 +17,41 @@ class ResultTextTest {
     private val now = today.atTime(12, 0).toInstant(ZoneOffset.UTC).toEpochMilli()
     private val hour = 60 * 60 * 1000L
     private val day = 24 * hour
+
+    // --- where a memory has got to ---------------------------------------------
+
+    @Test
+    fun `a memory read and on the server says nothing`() {
+        val done = Memory(type = MemoryType.IMAGE, localUri = "file:///o/a.png", extractedText = "", syncState = SyncState.SYNCED)
+
+        assertNull(ResultText.status(done))
+    }
+
+    @Test
+    fun `one not sent yet is found by its words only`() {
+        assertEquals(
+            "not sent yet · words only",
+            ResultText.status(Memory(type = MemoryType.TEXT, rawText = "x", syncState = SyncState.PENDING)),
+        )
+        assertEquals(
+            "not sent yet · words only",
+            ResultText.status(Memory(type = MemoryType.TEXT, rawText = "x", syncState = SyncState.UPLOADING)),
+        )
+    }
+
+    @Test
+    fun `a refused memory says so`() {
+        assertEquals("the server refused it", ResultText.status(Memory(type = MemoryType.TEXT, syncState = SyncState.FAILED)))
+    }
+
+    @Test
+    fun `what the phone is still reading comes first`() {
+        val photo = Memory(type = MemoryType.IMAGE, localUri = "file:///o/a.png", syncState = SyncState.PENDING)
+        val link = Memory(type = MemoryType.LINK, rawText = "https://example.com", syncState = SyncState.SYNCED)
+
+        assertEquals("still reading it · not sent yet · words only", ResultText.status(photo))
+        assertEquals("page not read yet", ResultText.status(link))
+    }
 
     // --- a long text's opening ---------------------------------------------------
 

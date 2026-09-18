@@ -43,6 +43,7 @@
     <string name="detail_saved">saved</string>
     <string name="detail_from">from</string>
     <string name="detail_taken">taken</string>
+    <string name="detail_status">status</string>
     <string name="detail_text_found">text found</string>
     <string name="detail_from_page">from the page</string>
     <string name="detail_seen">what it shows</string>

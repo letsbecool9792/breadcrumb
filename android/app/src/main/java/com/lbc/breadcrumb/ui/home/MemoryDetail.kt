@@ -412,6 +412,8 @@ private fun Provenance(memory: Memory, now: Long) {
         stringResource(R.string.detail_saved) to ResultText.saved(memory.capturedAt, now, zone),
         memory.sourceAppLabel?.let { stringResource(R.string.detail_from) to it.lowercase() },
         memory.contentCreatedAt?.let { stringResource(R.string.detail_taken) to ResultText.taken(it, now, zone) },
+        // live: it changes as the phone reads it and the queue sends it
+        ResultText.status(memory)?.let { stringResource(R.string.detail_status) to it },
     )
     Column {
         HorizontalDivider(color = InkElevated)
