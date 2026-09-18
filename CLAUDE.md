@@ -139,12 +139,16 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **A shared `content://` URI is readable only while the receiving activity is alive.** Finish first and copy later and the copy fails with a SecurityException. So the capture sheet **cannot be dismissed while it shows "Saving…"** — swipe, back and tapping outside are all ignored until the copy completes, because closing the activity would revoke the grant mid-copy. The same constraint means **provider metadata — notably `DATE_TAKEN` — must be read at capture time**; it cannot be backfilled later.
 - **Closing a capture activity is a cross-task transition, and apps cannot customise those.** Sharing apps launch targets with `NEW_TASK` / `NEW_DOCUMENT` and the tile must use `NEW_TASK`, so every capture activity runs in its own task. On finish the system slides the window down; `overrideActivityTransition`, `overridePendingTransition` and `windowAnimationStyle` are all ignored for cross-task transitions. Whatever the window still holds slides with it — on-device, the dim slid away a beat after the sheet. The fix (`CaptureActivity.finishInvisibly`): make the decor view `INVISIBLE`, wait two frames for the window manager to hide the surface, then finish. Diagnosed from logcat: SurfaceFlinger layer names at close showed a `Transition Root` for the underlying task and no system dim or backdrop layer, which placed the tint in our own window. **Any future transparent activity that must close cleanly needs the same treatment.**
 - **OCR uses ML Kit's bundled model** (`com.google.mlkit:text-recognition`), not `play-services-mlkit-text-recognition`, which downloads its model on first use and so is not offline from the first save. Gradle fetches the model from Google's Maven at build time and packs it into the APK; nothing is checked in. The cost is APK size: its native library is ~11 MB per ABI, ~41 MB across all four, of which x86/x86_64 serve only emulators. The arm64 library is 16 KB page-aligned (checked from its ELF headers).
-- **`extractedText`: null means not read yet, empty means read and holding no text.** `OcrQueue` finds its work by that null, so never write empty to mean anything else, and resetting a row to null queues it to be read again.
-- **Nothing calls OCR.** `OcrQueue` starts in `BreadcrumbApp.onCreate` — every process, capture included — and watches Room for unread images. Any code that inserts IMAGE rows, the 5.1 importer included, gets them read without doing anything.
+- **`extractedText` is what the phone read out of the thing** — OCR of a picture, a PDF's text, a link's page description. **Null means not read yet, empty means read and holding no text.** `OcrQueue` (pictures, PDFs) and the upload worker's `LinkReading` (links) find their work by that null, so never write empty to mean anything else, and resetting a row to null queues it to be read again.
+- **Nothing calls OCR.** `OcrQueue` starts in `BreadcrumbApp.onCreate` — every process, capture included — and watches Room for unread images and PDFs. Any code that inserts IMAGE or PDF rows, the 5.1 importer included, gets them read without doing anything. Links are read the same way, by the upload worker's first step.
+- **A PDF is read by its text layer on Android 15+** (`PdfRenderer.Page.getTextContents`, API 35), and by OCR of its first six pages when there is none — a scan — or on older Android. Up to 20,000 characters are kept (`PdfRules`); the server's model reads the first 4,000 and embeds 6,000, the word indexes take it all. A PDF behind a password reads as empty.
+- **A link's page is read from the phone, never the server** (`PageReader`, `LinkReading`): the person's own connection, as when they open it, and the server never fetches arbitrary URLs. Only the head, up to `</head>` or 512 KB; plain http goes as https; never localhost or a bare IP. Every answer is final — an error page, a login wall's title, a dead link while online — except losing the network, which leaves the link for the next pass. The page title becomes `title` only when the memory has none (a Chrome share brings its own).
+- **A capture sheet holds its memories back from upload until it goes** (`BreadcrumbApp.uploadHolds`, passed over by `pendingUploads`), so a note written in it costs no second send. Released on dismiss, on leaving for another app, and on destroy — a hold that is never released strands a memory until the process dies.
 - **ML Kit reports usage to Google — accepted, 2026-09-15.** Its logging queue shows up as `databases/com.google.android.datatransport.events` in app storage. What it sends is SDK usage and performance data, not images or recognized text, so rule 1's stance holds: originals and their text stay on the device. Accepted rather than stripped, since removing the transport service by manifest merge is unsupported and could break on an ML Kit update. Revisit if the privacy stance tightens.
 - **A Text given a style takes nothing from the theme**, so every style names its face — use the helpers in `ui/home/HomeType.kt` (`serif`, `sans`, `monoStyle`), never a bare `TextStyle(fontSize = …)`, which falls back to the platform font. Text given only loose parameters (as the capture sheet's are) inherits Material's type scale, which is set in Instrument Sans.
 - **Serif or sans is decided by where a title sits, never by the kind of memory.** Among others on the page — tiles, result rows, the capture sheet — a memory's title is `sans`; opened in its detail it is `serif`. The serif is otherwise only the app's voice (the wordmark, "Saved", empty states).
-- **The detail sheet is the app's own `SheetLayer`, not Material's `ModalBottomSheet`.** A shared-element transition — the picture travelling from its tile — only works within one composition, and Material's sheet lives in a window of its own. `SheetLayer` gives back what Material's gave: a height limit, a scrim that closes it, Back, and drag-to-dismiss handed off from the content's scroll through a nested-scroll connection.
+- **The detail sheet is the app's own `SheetLayer`, not Material's `ModalBottomSheet`.** A shared-element transition — the picture travelling from its tile — only works within one composition, and Material's sheet lives in a window of its own. `SheetLayer` gives back what Material's gave: a height limit, a scrim that closes it, Back (predictive: the sheet follows the swipe, via `PredictiveBackHandler` and `enableOnBackInvokedCallback`), standing on the keyboard, and drag-to-dismiss handed off from the content's scroll through a nested-scroll connection. The "+" sheet is a `SheetLayer` too.
+- **The launcher shortcut names the applicationId** (`res/xml/shortcuts.xml`, `targetPackage`). Adding an `applicationIdSuffix` to a build type breaks it for that build.
 - **Animations that loop or follow a gesture run only while shown, and are read while drawing** (`graphicsLayer`, `drawBehind`, `Canvas`), not in composition: an infinite transition left running at rest redraws every frame, and reading one in composition recomposes every frame.
 - **Haptics follow the phone's Touch feedback setting.** They go through `performHapticFeedback`, which Android drops when that setting is off — it was off on the dev phone at first (`adb shell settings get system haptic_feedback_enabled` read 0). Felt nothing? Check that before the code.
 - **Upsert with `@Upsert`, never `@Insert(onConflict = REPLACE)`.** `memories_fts` is an external-content index kept in step by triggers, and REPLACE deletes the old row without firing delete triggers — the old text would stay searchable. `MemorySearchTest` covers it.
@@ -198,6 +202,7 @@ npm run typecheck
 - **`FAILED` means the server refused a memory**, and is not retried automatically: the same bytes would be refused again. Transient failures go back to `PENDING` instead, and the debug Sync button queues refused ones again.
 - **Every delete goes through `MemoryDao.deleteEverywhere`**, never `delete` alone: it removes the row and records a `pending_deletes` entry in one transaction, and the upload queue sends those first. A delete that stays on the phone leaves the memory's text and vector in Atlas. The debug list's **Clear** deletes everything on the server too.
 - **`Memory.enrichedAt` null means "ask the server"** for its reading. `markSynced` and `markImageSent` clear it — every send may have been read again — and the queue's last step copies summary, kind and readText back. Every id asked about is marked, answer or not, so the pass cannot loop.
+- **A memory's note is never given to the model to describe** (`enrichmentSource` in ingest.ts). It is embedded, near the front, and word-indexed (`memories_text` gained a `note` field, which startup adds to the live index). So writing or editing a note costs one embedding and never a Flash Lite call, and never replaces what the model saw in a picture with a reading of the note alone. A picture sent to be read does get the note as context.
 - **A model call that may succeed later must answer 503, never 200.** A 200 marks the memory synced on the phone, and nothing re-enriches it afterwards — the phone re-sending it *is* the re-enrichment path.
 - **Pictures reach the server as base64 JSON and are never written anywhere**, not even a temp file (rule 1). `/memories/images` only reads pictures for memories it already holds; the phone sends memories first and pictures after, in the same worker run.
 - **OCR must ask for an upload pass after *every* read, including one that found nothing.** Images are held back until OCR has looked at them, and an empty read is the very case whose picture gets sent — skip the signal and those photos wait for the next save or launch.
@@ -360,8 +365,7 @@ Do not start the next step until the current one is ticked. Do not batch several
       · verified on device: images saved in phase 1 were read on the next launch; a text-heavy
         screenshot shows its text; a photo without text shows "no text found"; the capture sheet
         animates as before
-      · open: Latin script only. And nothing in V1 reads a **PDF's contents** — 2.1 and 3.6 are
-        images only — so a PDF is findable by filename alone until that is decided
+      · open: Latin script only. (A PDF's contents went unread, found by filename alone, until 4.9.)
 - [x] **2.2** Room FTS index + local keyword search
       · *test:* `./gradlew testDebugUnitTest` — `FtsQueryTest` (words become quoted prefix terms)
       · *test:* on-device `MemorySearchTest` — OCR-only words, prefixes, every word must match,
@@ -551,10 +555,64 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
       · verified on device: faces, masthead, tiles, the walking crumb and the breathing
         light, results and mosaic motion, the travelling picture, and all four haptics
 
+**Before seeding, 2026-09-18:** the user asked for two ways in (4.7, 4.8), for the two gaps
+phase 5 would expose — a bare link carries only its URL, a PDF only its filename — to be
+closed (4.9), and for seven small fixes (4.10). Built on the `pre-seeding` branch, one commit
+per piece; the user checks it all on the phone and merges.
+
+- [~] **4.7** A note on a save — built, awaiting the user's check on the phone
+      · the capture sheet's quiet "add a note" opens a field (closed by default: saving stays
+        one tap); the note goes on every memory the share saved, when the sheet goes
+      · `Memory.note`, schema v7 (the word index gains it and is rebuilt); kept apart from
+        `rawText`, which is what was shared
+      · the memories wait out the open sheet (`uploadHolds`), so a note costs no second send
+      · server: embedded and word-indexed, never read by the model (see the gotcha), and in
+        search results
+      · *test:* `npm test` in `server/` — the note parsed, stored, embedded; a note written
+        later costing an embedding and no model call; a picture with only a note embedded by
+        it; a memory found by its note's words. `./gradlew testDebugUnitTest` —
+        `ServerClientTest` (the payload carries it); on-device `MemoryDaoTest` (found by local
+        search, re-queues, unchanged is no change) and `MemoryUploaderTest` (held while the
+        sheet is open)
+- [~] **4.8** The "+": keeping something from inside the app — built, awaiting the check
+      · an amber "+" beside the search field (hidden while searching) opens a `SheetLayer`:
+        one box to write in, a photo (system photo picker, no permission) or PDF to go with
+        it. No title, no formatting — not a notes app
+      · text alone is the memory (a note, or a link by the share rules); with files, each file
+        is a memory and the text is their note. No source app. A draft survives the sheet
+        being swiped away
+      · a launcher shortcut, "Keep something", opens it straight from the app icon
+      · *test:* on-device `WrittenCaptureTest`; the picking and saving of files on the phone
+- [~] **4.9** Reading what was saved: PDFs' text and links' pages — built, awaiting the check
+      · a PDF is read on the phone: its text layer on Android 15+, OCR of its first pages
+        otherwise; every PDF already saved is read on the next launch and sent again
+      · a link's page is read on the phone by the upload worker's first step: its title (when
+        the memory has none) and description, so a link copied bare from a chat is found by
+        what it was about. Links already saved are read on the next pass
+      · both ride the ordinary batched upload: no request of their own
+      · *test:* `./gradlew testDebugUnitTest` — `PdfRulesTest`, `PageMetaTest`,
+        `PageReaderTest` (against a local server); on-device `PdfReaderTest` (a PDF with a text
+        layer, and a scan, both drawn by the test), `OcrQueueTest`, `LinkReadingTest`,
+        `MemoryUploaderTest` (fresh PDFs and links held while unread)
+- [~] **4.10** Seven small fixes — built, awaiting the check
+      · a drag on the results or the mosaic puts the keyboard away
+      · tapping the slim "breadcrumb" strip goes back to the top of the mosaic
+      · share a memory onward from its detail: the file, the URL alone, or the note's words;
+        Breadcrumb itself left out of the share sheet
+      · the note shown in the detail and editable there — only the note, never the memory
+      · the launcher shortcut (4.8)
+      · sheets follow the predictive back gesture
+      · a "status" line in the detail while there is one: still reading, page not read,
+        not sent yet (so found by words only), refused
+      · *test:* `OriginalsTest` and on-device `OriginalsProviderTest` (sharing), `ResultTextTest`
+        (the status line)
+
 ### Phase 5 — Seeding
 
 - [ ] **5.1** Bulk importer: screenshots folder
 - [ ] **5.2** Bulk importer: Chrome bookmarks export, downloaded PDFs
+      · the importer only inserts rows: 4.9 reads every unread link's page and PDF's text
+        on its own, four pages at a time, from the phone, at no Gemini cost
       · *test:* 500+ real items indexed, then honestly assess retrieval quality
 
 **Why phase 5 is not optional:** a personal memory search engine is worthless until it holds a few hundred items. The likely failure mode for this project is building it, using it a week, having 14 items, finding search unimpressive, and losing motivation. This kills most apps in the category. Seed 500+ real items so retrieval is tuned against a corpus that actually exercises it. Pull it earlier than phase 5 if motivation dips.
