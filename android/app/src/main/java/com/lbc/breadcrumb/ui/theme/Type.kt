@@ -21,28 +21,11 @@ import com.lbc.breadcrumb.R
 // is opened -- for every kind of memory, never by kind.
 
 /**
- * Fraunces, a soft "wonky" old-style serif: regular weight, with a WONK axis
- * that tilts a few letters for a hand-set, slightly off-kilter look. Chosen
- * over Instrument Serif, which read too thin on the ink.
- *
- * One variable file. Every axis is set, since its defaults are not what a
- * title wants -- the file's default weight is 900: weight 400, optical size
- * 24 (the cut drawn for title sizes: sturdier than display, finer than
- * text), SOFT 50 to round its corners a little, WONK on.
+ * Young Serif: a sturdy, slightly chunky old-style serif with a large
+ * x-height -- one regular weight, and a face not often seen. The user's pick,
+ * after Instrument Serif (too thin on the ink) and Fraunces.
  */
-@OptIn(ExperimentalTextApi::class)
-val Serif = FontFamily(
-    Font(
-        R.font.fraunces,
-        FontWeight.Normal,
-        variationSettings = FontVariation.Settings(
-            FontVariation.weight(400),
-            FontVariation.Setting("opsz", 24f),
-            FontVariation.Setting("SOFT", 50f),
-            FontVariation.Setting("WONK", 1f),
-        ),
-    ),
-)
+val Serif = FontFamily(Font(R.font.young_serif, FontWeight.Normal))
 
 /**
  * Instrument Sans: one variable file serving every weight used here. Setting
