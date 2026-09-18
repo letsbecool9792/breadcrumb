@@ -7,6 +7,7 @@ import { ingestImages, parseImages } from "./images.ts";
 import { type IncomingMemory, ingest, parseMemory } from "./ingest.ts";
 import { type QueryParser, understanding } from "./query.ts";
 import { answerSearch, parseSearch } from "./search.ts";
+import { enrichmentFor, parseIds } from "./sync.ts";
 
 /** One request's worth of memories. The phone sends ten; this is the ceiling. */
 const MAX_BATCH = 50;
@@ -31,7 +32,8 @@ export interface AppOptions {
 
 /**
  * The HTTP surface, built without listening so tests can serve it on any
- * port. Stays thin: health, ingest and search.
+ * port. Stays thin: health, ingest, search, and keeping the phone in step --
+ * what the model made of a memory.
  */
 export function createApp({ log = true, extract, embed, extractImages, parseQuery, database }: AppOptions) {
   const app = express();
@@ -101,6 +103,17 @@ export function createApp({ log = true, extract, embed, extractImages, parseQuer
     const results = await ingestImages(database ?? db(), extractImages, embed, parsed.images);
     const status = results.some((result) => result.retryable) ? 503 : 200;
     res.status(status).json({ results });
+  });
+
+  // What the model made of memories the phone has sent, so the phone keeps a
+  // copy: a memory opened from the mosaic shows its summary without a search.
+  app.post("/memories/enrichment", express.json({ limit: "64kb" }), async (req, res) => {
+    const parsed = parseIds(req.body);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    res.json({ results: await enrichmentFor(database ?? db(), parsed.ids) });
   });
 
   // A ranked list of memories, never an answer: each result is a way back to
