@@ -27,8 +27,10 @@ class OcrQueue(
     private val batchSize: Int = 10,
     private val clock: () -> Long = System::currentTimeMillis,
     /**
-     * Called after text is written. Reading an image queues it to sync again,
-     * since the server has not seen those words yet (step 3.5).
+     * Called after every read, text or none. An image is held back from upload
+     * until OCR has looked at it (step 3.5), so finishing a read is what lets
+     * it go -- and a read that found nothing is the very case where the picture
+     * itself gets sent to be read (step 3.6).
      */
     private val onRead: () -> Unit = {},
 ) {
@@ -80,7 +82,7 @@ class OcrQueue(
             }
         }
         dao.setExtractedText(memory.id, text, clock())
-        if (text.isNotEmpty()) onRead()
+        onRead()
     }
 
     private companion object {

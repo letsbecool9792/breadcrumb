@@ -185,6 +185,18 @@ class OcrQueueTest {
     }
 
     @Test
+    fun drain_asksForAnUploadPassEvenWhenAPictureHeldNoText() = runBlocking {
+        // an image waits for OCR before it is sent, and one with no words is the
+        // very case whose picture gets read -- so an empty read must still let it go
+        image("blank")
+        var passes = 0
+
+        OcrQueue(dao, store, OcrReader { "" }, onRead = { passes += 1 }).drain()
+
+        assertEquals(1, passes)
+    }
+
+    @Test
     fun run_readsImagesSavedWhileItWatches() = runBlocking {
         val watching = launch(Dispatchers.IO) { queue { "read later" }.run() }
         try {

@@ -98,6 +98,32 @@ interface MemoryDao {
     @Query("UPDATE memories SET syncState = :state WHERE id = :id AND syncState = 'UPLOADING'")
     suspend fun markUploadEnded(id: String, state: SyncState): Int
 
+    /**
+     * Images whose picture is worth sending to be read (step 3.6): the memory
+     * is already on the server, OCR found little or nothing in it, and it has
+     * not been sent before.
+     *
+     * A screenshot full of text needs none of this -- its words are already
+     * indexed, and a picture costs roughly ten times the tokens. What is left
+     * is the photo of a whiteboard, the chart, the meme: the saves that are
+     * otherwise almost unfindable.
+     *
+     * @param minChars below this much text, the picture is worth a look.
+     * @param ocrDeadline images OCR has not read are only sent once this old,
+     *   so a read still in flight is not pre-empted.
+     */
+    @Query(
+        "SELECT * FROM memories WHERE type = 'IMAGE' AND localUri IS NOT NULL " +
+            "AND imageSentAt IS NULL AND syncState = 'SYNCED' " +
+            "AND LENGTH(COALESCE(extractedText, '')) < :minChars " +
+            "AND (extractedText IS NOT NULL OR capturedAt <= :ocrDeadline) " +
+            "ORDER BY capturedAt DESC LIMIT :limit"
+    )
+    suspend fun imagesAwaitingRead(minChars: Int, ocrDeadline: Long, limit: Int): List<Memory>
+
+    @Query("UPDATE memories SET imageSentAt = :now WHERE id = :id")
+    suspend fun markImageSent(id: String, now: Long)
+
     /** Queues every refused memory again -- after a fix, on demand. */
     @Query("UPDATE memories SET syncState = 'PENDING' WHERE syncState = 'FAILED'")
     suspend fun retryFailed(): Int

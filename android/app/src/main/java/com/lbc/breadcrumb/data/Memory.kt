@@ -96,6 +96,13 @@ data class Memory(
     /** Server-side id, once this row has synced. */
     val remoteId: String? = null,
 
+    /**
+     * When the picture itself was sent for reading (step 3.6). Only images
+     * whose words OCR could not read are sent, and only once -- a picture
+     * costs about a thousand model tokens, against a few hundred for text.
+     */
+    val imageSentAt: Long? = null,
+
     val syncState: SyncState = SyncState.PENDING,
 
     val updatedAt: Long = System.currentTimeMillis(),

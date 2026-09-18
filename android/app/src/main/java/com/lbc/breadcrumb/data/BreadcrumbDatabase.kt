@@ -11,7 +11,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Memory::class, MemoryFts::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
     autoMigrations = [
         // v2: hasLink, so a memory can carry a LINK chip beside its primary type
@@ -21,6 +21,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AutoMigration(from = 2, to = 3),
         // v4: the full-text search index, filled from the memories already saved
         AutoMigration(from = 3, to = 4, spec = BreadcrumbDatabase.BuildSearchIndex::class),
+        // v5: imageSentAt. No backfill -- null means "not sent yet", which is
+        // true of every image saved before this, and they are worth reading.
+        AutoMigration(from = 4, to = 5),
     ],
 )
 @TypeConverters(Converters::class)

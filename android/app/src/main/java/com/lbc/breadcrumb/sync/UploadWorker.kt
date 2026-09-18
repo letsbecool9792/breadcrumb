@@ -12,6 +12,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.lbc.breadcrumb.BreadcrumbApp
 import com.lbc.breadcrumb.data.BreadcrumbDatabase
+import com.lbc.breadcrumb.data.OriginalStore
 import java.util.concurrent.TimeUnit
 
 /**
@@ -23,19 +24,29 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
     override suspend fun doWork(): Result {
         val app = applicationContext as BreadcrumbApp
-        val uploader = MemoryUploader(BreadcrumbDatabase.get(applicationContext).memoryDao(), app.server)
+        val uploader = MemoryUploader(
+            dao = BreadcrumbDatabase.get(applicationContext).memoryDao(),
+            api = app.server,
+            store = OriginalStore(applicationContext),
+        )
 
-        return when (val outcome = uploader.uploadPending()) {
-            is UploadOutcome.Done -> {
-                if (outcome.sent > 0) Log.i(TAG, "uploaded ${outcome.sent}")
-                Result.success()
-            }
-
-            is UploadOutcome.RetryLater -> {
-                Log.i(TAG, "uploaded ${outcome.sent}, stopping: ${outcome.reason}")
-                Result.retry()
-            }
+        // Memories first: a picture is only read for a memory the server holds.
+        val memories = uploader.uploadPending()
+        if (memories is UploadOutcome.RetryLater) {
+            Log.i(TAG, "uploaded ${memories.sent}, stopping: ${memories.reason}")
+            return Result.retry()
         }
+
+        val images = uploader.uploadImages()
+        if (images is UploadOutcome.RetryLater) {
+            Log.i(TAG, "read ${images.sent} pictures, stopping: ${images.reason}")
+            return Result.retry()
+        }
+
+        val sent = (memories as UploadOutcome.Done).sent
+        val read = (images as UploadOutcome.Done).sent
+        if (sent > 0 || read > 0) Log.i(TAG, "uploaded $sent, read $read pictures")
+        return Result.success()
     }
 
     companion object {

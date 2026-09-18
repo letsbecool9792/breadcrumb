@@ -14,6 +14,7 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.ConnectException
 import java.net.SocketException
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 /** What the app knows about reaching its backend. */
@@ -47,6 +48,24 @@ interface MemoryUploadApi {
      * is treated as unsent.
      */
     suspend fun upload(memories: List<Memory>): Map<String, UploadResult>
+
+    /**
+     * Sends the pictures themselves, for memories already stored on the server
+     * (step 3.6). They are read and dropped there; nothing of them is kept but
+     * what the model saw (architecture rule 1).
+     */
+    suspend fun uploadImages(images: List<OutgoingImage>): Map<String, UploadResult>
+}
+
+/** One picture on its way to be read: the memory it belongs to, and its bytes. */
+data class OutgoingImage(val memoryId: String, val mimeType: String, val bytes: ByteArray) {
+    // data class equality on a ByteArray compares references, which would make
+    // any test of these quietly wrong
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is OutgoingImage && memoryId == other.memoryId &&
+            mimeType == other.mimeType && bytes.contentEquals(other.bytes))
+
+    override fun hashCode(): Int = 31 * (31 * memoryId.hashCode() + mimeType.hashCode()) + bytes.contentHashCode()
 }
 
 /**
@@ -126,6 +145,43 @@ class ServerClient(
         }
     }
 
+    override suspend fun uploadImages(images: List<OutgoingImage>): Map<String, UploadResult> =
+        withContext(Dispatchers.IO) {
+            if (images.isEmpty()) return@withContext emptyMap()
+
+            val payload = json.encodeToString(
+                images.map {
+                    ImagePayload(
+                        id = it.memoryId,
+                        mimeType = it.mimeType,
+                        data = Base64.getEncoder().encodeToString(it.bytes),
+                    )
+                }
+            )
+            val request = Request.Builder()
+                .url("$baseUrl/memories/images")
+                .post(payload.toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            try {
+                uploadHttp.newCall(request).execute().use { response ->
+                    val body = response.body.string()
+                    val results = runCatching { json.decodeFromString<IngestReplies>(body).results }.getOrNull()
+                    when {
+                        results != null ->
+                            images.associate { it.memoryId to (results.forId(it.memoryId) ?: notAnswered) }
+                        response.code in 400..499 && response.code != 408 && response.code != 429 ->
+                            images.associate {
+                                it.memoryId to UploadResult.Rejected("HTTP ${response.code}: ${body.take(200)}")
+                            }
+                        else -> images.associate { it.memoryId to UploadResult.Unavailable("HTTP ${response.code}") }
+                    }
+                }
+            } catch (e: IOException) {
+                images.associate { it.memoryId to UploadResult.Unavailable(describe(e)) }
+            }
+        }
+
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
@@ -167,6 +223,11 @@ private data class MemoryPayload(
         )
     }
 }
+
+/** No default for [results]: a body without it -- an error page, a refusal -- must not decode into "no answers". */
+/** base64 rather than multipart: no parser to add on either side, and the model wants it this way. */
+@Serializable
+private data class ImagePayload(val id: String, val mimeType: String, val data: String)
 
 /** No default for [results]: a body without it -- an error page, a refusal -- must not decode into "no answers". */
 @Serializable

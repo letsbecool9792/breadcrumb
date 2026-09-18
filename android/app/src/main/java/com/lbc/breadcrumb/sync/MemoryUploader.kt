@@ -2,9 +2,12 @@ package com.lbc.breadcrumb.sync
 
 import android.util.Log
 import com.lbc.breadcrumb.data.MemoryDao
+import com.lbc.breadcrumb.data.OriginalStore
 import com.lbc.breadcrumb.data.SyncState
 import com.lbc.breadcrumb.net.MemoryUploadApi
+import com.lbc.breadcrumb.net.OutgoingImage
 import com.lbc.breadcrumb.net.UploadResult
+import java.io.File
 
 /** How a pass over the queue ended. */
 sealed interface UploadOutcome {
@@ -27,12 +30,75 @@ sealed interface UploadOutcome {
 class MemoryUploader(
     private val dao: MemoryDao,
     private val api: MemoryUploadApi,
+    private val store: OriginalStore,
     /** Memories per request. One model call covers the batch, so this is quota. */
     private val batchSize: Int = 10,
+    /** Pictures per request -- fewer, since each costs about a thousand tokens. */
+    private val imageBatchSize: Int = 4,
+    /** Below this much text in an image, the picture itself is worth reading. */
+    private val minTextForReading: Int = 80,
     /** How long a freshly saved image may wait for OCR before it is sent anyway. */
     private val ocrGraceMillis: Long = 10 * 60_000,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Injected so the queue's bookkeeping can be tested without decoding bitmaps. */
+    private val prepareImage: (File) -> ByteArray? = { ImageForUpload.prepare(it) },
 ) {
+
+    /**
+     * Sends the pictures of images whose words OCR could not read (step 3.6),
+     * after their memories are on the server.
+     *
+     * Kept to a few at a time and to the images that need it: a picture costs
+     * roughly ten times the model tokens of the text beside it.
+     */
+    suspend fun uploadImages(): UploadOutcome {
+        var sent = 0
+        while (true) {
+            val waiting = dao.imagesAwaitingRead(
+                minChars = minTextForReading,
+                ocrDeadline = clock() - ocrGraceMillis,
+                limit = imageBatchSize,
+            )
+            if (waiting.isEmpty()) return UploadOutcome.Done(sent)
+
+            val images = waiting.mapNotNull { memory ->
+                val file = store.fileFor(memory)
+                val bytes = file?.let { prepareImage(it) }
+                if (bytes == null) {
+                    // Gone, or not a picture we can read. Marking it sent stops
+                    // us coming back to it every pass for nothing.
+                    Log.w(TAG, "nothing to send for ${memory.id}")
+                    dao.markImageSent(memory.id, clock())
+                    null
+                } else {
+                    OutgoingImage(memory.id, ImageForUpload.MIME_TYPE, bytes)
+                }
+            }
+            if (images.isEmpty()) continue
+
+            val results = api.uploadImages(images)
+            var waitingReason: String? = null
+
+            for (image in images) {
+                when (val result = results[image.memoryId] ?: UploadResult.Unavailable("no answer")) {
+                    is UploadResult.Stored -> {
+                        dao.markImageSent(image.memoryId, clock())
+                        sent += 1
+                    }
+
+                    is UploadResult.Rejected -> {
+                        // The server will not read it however often we ask.
+                        Log.w(TAG, "server refused the picture for ${image.memoryId}: ${result.reason}")
+                        dao.markImageSent(image.memoryId, clock())
+                    }
+
+                    is UploadResult.Unavailable -> waitingReason = result.reason
+                }
+            }
+
+            if (waitingReason != null) return UploadOutcome.RetryLater(sent, waitingReason)
+        }
+    }
 
     suspend fun uploadPending(): UploadOutcome {
         // A request in flight when the process died left its row UPLOADING.

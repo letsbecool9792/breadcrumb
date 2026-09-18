@@ -1,6 +1,7 @@
 package com.lbc.breadcrumb.sync
 
 import android.content.Context
+import android.net.Uri
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -8,16 +9,21 @@ import com.lbc.breadcrumb.data.BreadcrumbDatabase
 import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryDao
 import com.lbc.breadcrumb.data.MemoryType
+import com.lbc.breadcrumb.data.OriginalStore
 import com.lbc.breadcrumb.data.SyncState
 import com.lbc.breadcrumb.net.MemoryUploadApi
+import com.lbc.breadcrumb.net.OutgoingImage
 import com.lbc.breadcrumb.net.UploadResult
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /**
  * The queue's bookkeeping, against a fake server. Every failure here is one
@@ -37,24 +43,57 @@ class MemoryUploaderTest {
     private var requests = 0
     private var answer: (Memory) -> UploadResult = { UploadResult.Stored(it.id, enriched = true, embedded = true) }
 
+    /** Memory ids whose picture was sent, in order. */
+    private val pictures = mutableListOf<String>()
+    private var pictureRequests = 0
+    private var pictureAnswer: (String) -> UploadResult =
+        { UploadResult.Stored(it, enriched = true, embedded = true) }
+
     private val api = object : MemoryUploadApi {
         override suspend fun upload(memories: List<Memory>): Map<String, UploadResult> {
             requests += 1
             sent += memories.map { it.id }
             return memories.associate { it.id to answer(it) }
         }
+
+        override suspend fun uploadImages(images: List<OutgoingImage>): Map<String, UploadResult> {
+            pictureRequests += 1
+            pictures += images.map { it.memoryId }
+            return images.associate { it.memoryId to pictureAnswer(it.memoryId) }
+        }
     }
+
+    private lateinit var sandbox: File
+    private lateinit var store: OriginalStore
 
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         db = Room.inMemoryDatabaseBuilder(context, BreadcrumbDatabase::class.java).build()
         dao = db.memoryDao()
+        // cacheDir, never the real filesDir/originals: tests must not touch saved memories
+        sandbox = File(context.cacheDir, "uploader-test").apply { deleteRecursively(); mkdirs() }
+        store = OriginalStore(context, File(sandbox, "originals"))
     }
 
     @After
     fun tearDown() {
         db.close()
+        sandbox.deleteRecursively()
+    }
+
+    /** An image memory already on the server, with its file stored. */
+    private suspend fun readableImage(id: String, text: String?, capturedAt: Long = 1_000): Memory {
+        val source = File(sandbox, "$id-source.png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val stored = store.copyIn(Uri.fromFile(source), id, "png")
+        return Memory(
+            id = id,
+            type = MemoryType.IMAGE,
+            capturedAt = capturedAt,
+            localUri = store.uriFor(stored),
+            extractedText = text,
+            syncState = SyncState.SYNCED,
+        ).also { dao.upsert(it) }
     }
 
     private suspend fun saved(
@@ -69,8 +108,17 @@ class MemoryUploaderTest {
         syncState = state,
     ).also { dao.upsert(it) }
 
-    private fun uploader(now: Long = 10_000, batchSize: Int = 2) =
-        MemoryUploader(dao, api, batchSize = batchSize, ocrGraceMillis = 1_000, clock = { now })
+    private fun uploader(now: Long = 10_000, batchSize: Int = 2) = MemoryUploader(
+        dao = dao,
+        api = api,
+        store = store,
+        batchSize = batchSize,
+        imageBatchSize = 2,
+        ocrGraceMillis = 1_000,
+        clock = { now },
+        // the bitmap work is ImageForUpload's, and has its own tests
+        prepareImage = { file -> if (file.exists()) file.readBytes() else null },
+    )
 
     /** An image saved with its file copied in, before OCR has read it. */
     private suspend fun savedImage(id: String, capturedAt: Long): Memory = Memory(
@@ -233,6 +281,104 @@ class MemoryUploaderTest {
 
         assertEquals(5, sent.size)
         assertEquals(0, dao.pendingUploads(ocrDeadline = 0).size)
+    }
+
+    @Test
+    fun sendsThePictureOfAnImageOcrCouldBarelyRead() = runBlocking {
+        readableImage("whiteboard", text = "")
+
+        val outcome = uploader().uploadImages()
+
+        assertEquals(listOf("whiteboard"), pictures)
+        assertEquals(UploadOutcome.Done(1), outcome)
+        assertNotNull(dao.getById("whiteboard")!!.imageSentAt)
+    }
+
+    @Test
+    fun leavesAScreenshotFullOfTextAlone() = runBlocking {
+        // its words are already indexed, and a picture costs about ten times the tokens
+        readableImage("article", text = "Qualcomm is hiring software engineering interns in Bengaluru. ".repeat(3))
+
+        uploader().uploadImages()
+
+        assertTrue("a text-heavy screenshot should not be sent", pictures.isEmpty())
+        assertNull(dao.getById("article")!!.imageSentAt)
+    }
+
+    @Test
+    fun neverSendsTheSamePictureTwice() = runBlocking {
+        readableImage("whiteboard", text = "")
+
+        uploader().uploadImages()
+        uploader().uploadImages()
+
+        assertEquals(listOf("whiteboard"), pictures)
+    }
+
+    @Test
+    fun severalPicturesGoInOneRequest() = runBlocking {
+        readableImage("a", text = "", capturedAt = 1_000)
+        readableImage("b", text = null, capturedAt = 900)
+
+        uploader().uploadImages()
+
+        assertEquals(2, pictures.size)
+        assertEquals(1, pictureRequests)
+    }
+
+    @Test
+    fun waitsForOcrBeforeDecidingAPictureIsWorthReading() = runBlocking {
+        // unread, and saved a moment ago: OCR may still be about to find its words
+        readableImage("justSaved", text = null, capturedAt = 9_500)
+
+        uploader(now = 10_000).uploadImages()
+
+        assertTrue(pictures.isEmpty())
+    }
+
+    @Test
+    fun aPictureIsOnlySentOnceItsMemoryIsOnTheServer() = runBlocking {
+        val waiting = readableImage("waiting", text = "")
+        dao.upsert(waiting.copy(syncState = SyncState.PENDING))
+
+        uploader().uploadImages()
+
+        // the server reads a picture for a memory it holds; this one it does not
+        assertTrue(pictures.isEmpty())
+    }
+
+    @Test
+    fun aPictureTheServerCannotTakeIsNotOfferedForever() = runBlocking {
+        readableImage("odd", text = "")
+        pictureAnswer = { UploadResult.Rejected("HTTP 400 unsupported image") }
+
+        uploader().uploadImages()
+        uploader().uploadImages()
+
+        assertEquals(listOf("odd"), pictures)
+        assertNotNull(dao.getById("odd")!!.imageSentAt)
+    }
+
+    @Test
+    fun aPictureStaysQueuedWhenTheServerIsBusy() = runBlocking {
+        readableImage("whiteboard", text = "")
+        pictureAnswer = { UploadResult.Unavailable("429 rate limited") }
+
+        val outcome = uploader().uploadImages()
+
+        assertTrue(outcome is UploadOutcome.RetryLater)
+        assertNull(dao.getById("whiteboard")!!.imageSentAt)
+    }
+
+    @Test
+    fun anImageWhoseFileIsGoneIsNotRetriedForever() = runBlocking {
+        val memory = readableImage("lost", text = "")
+        store.delete(memory)
+
+        uploader().uploadImages()
+
+        assertTrue(pictures.isEmpty())
+        assertNotNull(dao.getById("lost")!!.imageSentAt)
     }
 
     @Test
