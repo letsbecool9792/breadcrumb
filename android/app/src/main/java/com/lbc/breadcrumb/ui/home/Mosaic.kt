@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
@@ -28,7 +29,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,15 +70,29 @@ private val TileShape = RoundedCornerShape(10.dp)
  * says what a thing is before it is read.
  */
 @Composable
-internal fun Mosaic(memories: List<Memory>?, now: Long, onOpen: (Memory) -> Unit) {
+internal fun Mosaic(
+    memories: List<Memory>?,
+    now: Long,
+    kept: String,
+    onOpenDebug: (() -> Unit)?,
+    onOpen: (Memory) -> Unit,
+) {
     // still loading: draw nothing rather than flash "nothing kept"
     if (memories == null) return
     if (memories.isEmpty()) {
-        Quiet(stringResource(R.string.archive_empty), stringResource(R.string.archive_empty_hint))
+        Column(Modifier.padding(horizontal = 14.dp)) {
+            Masthead(kept, onOpenDebug)
+            Quiet(stringResource(R.string.archive_empty), stringResource(R.string.archive_empty_hint))
+        }
         return
     }
 
     val grid = rememberLazyStaggeredGridState()
+    var mastheadHeight by remember { mutableIntStateOf(0) }
+    val collapse by remember {
+        derivedStateOf { mastheadCollapse(grid.firstVisibleItemIndex, grid.firstVisibleItemScrollOffset, mastheadHeight) }
+    }
+
     Box(Modifier.fillMaxSize()) {
         LazyVerticalStaggeredGrid(
             columns = StaggeredGridCells.Fixed(2),
@@ -84,13 +102,19 @@ internal fun Mosaic(memories: List<Memory>?, now: Long, onOpen: (Memory) -> Unit
             verticalItemSpacing = 10.dp,
             modifier = Modifier.fillMaxSize(),
         ) {
+            item(key = MASTHEAD_KEY, span = StaggeredGridItemSpan.FullLine) {
+                Masthead(kept, onOpenDebug, Modifier.onSizeChanged { mastheadHeight = it.height })
+            }
             items(memories, key = { it.id }) { memory ->
                 Tile(memory, now, onClick = { onOpen(memory) })
             }
         }
+        if (collapse > 0f) CollapsedMasthead(kept, shown = collapse, Modifier.align(Alignment.TopCenter))
         DateScrubber(grid, memories, Modifier.align(Alignment.CenterEnd))
     }
 }
+
+private const val MASTHEAD_KEY = "masthead"
 
 @Composable
 private fun Tile(memory: Memory, now: Long, onClick: () -> Unit) {
@@ -214,7 +238,10 @@ private fun Caption(title: String?, meta: String) {
 private fun DateScrubber(grid: LazyStaggeredGridState, memories: List<Memory>, modifier: Modifier) {
     val zone = remember { ZoneId.systemDefault() }
     val month by remember(memories) {
-        derivedStateOf { memories.getOrNull(grid.firstVisibleItemIndex)?.let { ResultText.monthOf(it.capturedAt, zone) } }
+        // item 0 is the masthead, so the tiles start at 1
+        derivedStateOf {
+            memories.getOrNull((grid.firstVisibleItemIndex - 1).coerceAtLeast(0))?.let { ResultText.monthOf(it.capturedAt, zone) }
+        }
     }
     val alpha by animateFloatAsState(
         targetValue = if (grid.isScrollInProgress) 1f else 0f,

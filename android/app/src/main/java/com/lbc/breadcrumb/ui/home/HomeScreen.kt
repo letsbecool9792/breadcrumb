@@ -96,16 +96,19 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
             .background(Ink)
             .statusBarsPadding(),
     ) {
-        TopLine(
-            search = search,
-            total = memories?.size ?: 0,
-            unsent = unsent,
-            onOpenDebug = onOpenDebug,
-        )
+        val total = memories?.size ?: 0
+        // at rest the mosaic carries its own masthead; a search has its counter
+        if (search is SearchState.Searching) Counter(search, total)
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (search) {
-                SearchState.Resting -> Mosaic(memories, now, onOpen = { viewModel.open(Result(it, hit = null)) })
+                SearchState.Resting -> Mosaic(
+                    memories = memories,
+                    now = now,
+                    kept = ResultText.kept(total, unsent),
+                    onOpenDebug = onOpenDebug,
+                    onOpen = { viewModel.open(Result(it, hit = null)) },
+                )
                 is SearchState.Searching -> Results(search, now, onOpen = viewModel::open)
             }
             // content fades under the search field rather than stopping abruptly
@@ -190,52 +193,28 @@ private fun UndoBar(removed: Memory?, onUndo: () -> Unit) {
     }
 }
 
-/** Near-zero chrome: the wordmark and a count at rest, the result counter while searching. */
-@OptIn(ExperimentalFoundationApi::class)
+/** The line over the results: how many, of how many, and what was searched for. */
 @Composable
-private fun TopLine(search: SearchState, total: Int, unsent: Int, onOpenDebug: (() -> Unit)?) {
-    val mono = TextStyle(fontFamily = MonoFamily, fontSize = 11.sp, color = InkOutline)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        when (search) {
-            SearchState.Resting -> {
-                Text(
-                    text = stringResource(R.string.home_wordmark).uppercase(),
-                    style = mono.copy(letterSpacing = 1.5.sp),
-                    modifier = if (onOpenDebug == null) Modifier else Modifier.combinedClickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {},
-                        onLongClick = onOpenDebug,
-                    ),
-                )
-                Text(ResultText.kept(total, unsent), style = mono)
-            }
-            is SearchState.Searching -> Text(
-                text = ResultText.counter(
-                    shown = search.results.size,
-                    total = total,
-                    typed = search.phrase,
-                    interpretation = search.interpretation,
-                    today = LocalDate.now(),
-                    status = when (search.status) {
-                        SearchStatus.RANKING -> "searching…"
-                        SearchStatus.RANKED -> null
-                        SearchStatus.OFFLINE -> "offline · words only"
-                        SearchStatus.UNAVAILABLE -> "search busy · words only"
-                    },
-                ),
-                style = mono.copy(letterSpacing = 0.3.sp),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
+private fun Counter(search: SearchState.Searching, total: Int) {
+    Text(
+        text = ResultText.counter(
+            shown = search.results.size,
+            total = total,
+            typed = search.phrase,
+            interpretation = search.interpretation,
+            today = LocalDate.now(),
+            status = when (search.status) {
+                SearchStatus.RANKING -> "searching…"
+                SearchStatus.RANKED -> null
+                SearchStatus.OFFLINE -> "offline · words only"
+                SearchStatus.UNAVAILABLE -> "search busy · words only"
+            },
+        ),
+        style = monoStyle(11.sp, InkOutline).copy(letterSpacing = 0.3.sp),
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 12.dp),
+    )
 }
 
 /**
