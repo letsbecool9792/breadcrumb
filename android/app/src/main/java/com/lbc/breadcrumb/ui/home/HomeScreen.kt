@@ -111,6 +111,7 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
         val total = memories?.size ?: 0
         // here rather than in the mosaic, so a search and back returns to the same place in it
         val grid = rememberLazyStaggeredGridState()
+        val entrances = remember { MosaicEntrances() }
         // the search being left stays drawn while it fades out
         var lastSearch by remember { mutableStateOf<SearchState.Searching?>(null) }
         if (search is SearchState.Searching) lastSearch = search
@@ -136,6 +137,7 @@ fun HomeScreen(onOpenDebug: (() -> Unit)?, viewModel: HomeViewModel = viewModel(
                         now = now,
                         kept = ResultText.kept(total, unsent),
                         grid = grid,
+                        entrances = entrances,
                         onOpenDebug = onOpenDebug,
                         onOpen = { viewModel.open(Result(it, hit = null)) },
                     )
