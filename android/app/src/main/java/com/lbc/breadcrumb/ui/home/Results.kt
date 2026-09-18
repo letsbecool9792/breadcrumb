@@ -8,6 +8,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.IntOffset
@@ -80,6 +82,14 @@ internal fun Results(state: SearchState.Searching, now: Long, onOpen: (Result) -
                 Quiet(stringResource(R.string.results_words_only), stringResource(R.string.results_words_only_hint))
         }
         return
+    }
+
+    // a light tick as the ranked answer lands, felt more than noticed
+    val haptics = LocalHapticFeedback.current
+    LaunchedEffect(state.phrase, state.status) {
+        if (state.status == SearchStatus.RANKED && state.results.isNotEmpty()) {
+            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        }
     }
 
     // Rows that have already arrived in this search do not arrive again --

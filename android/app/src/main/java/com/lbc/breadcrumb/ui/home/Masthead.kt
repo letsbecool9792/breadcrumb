@@ -16,6 +16,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,6 +36,7 @@ import com.lbc.breadcrumb.ui.theme.InkOutline
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun Masthead(kept: String, onLongPress: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val haptics = LocalHapticFeedback.current
     Column(
         modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -45,7 +48,10 @@ internal fun Masthead(kept: String, onLongPress: (() -> Unit)?, modifier: Modifi
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = {},
-                onLongClick = onLongPress,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongPress()
+                },
             ),
         )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
