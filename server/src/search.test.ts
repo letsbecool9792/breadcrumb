@@ -299,6 +299,8 @@ const seeded: MemoryDoc[] = (
     { ...base, _id: "dinner", type: "TEXT", rawText: "Naru's in Indiranagar does omakase, book two weeks ahead" },
     // an image OCR has not read yet: nothing to match in either half
     { ...base, _id: "unread", type: "IMAGE" },
+    // a photo with no words in it, and a note saying what it is
+    { ...base, _id: "noted", type: "IMAGE", note: "the flat with the big balcony, in Priya's building" },
 
     // for 4.3's filters: two screenshots saved in September, taken in April and May
     {
@@ -363,6 +365,7 @@ const phrases: Record<string, number[]> = {
   internship: direction([6, 1]),
   "check this": direction([8, 0.5], [9, 0.5], [10, 0.5]),
   stuff: direction([11, 1]),
+  balcony: direction([12, 1]),
 };
 
 /** What the stub parser makes of each test phrase: as the live one should, by 4.3's own tests. */
@@ -535,6 +538,16 @@ describe(
         assert.deepEqual(dinner.ranks, { vector: null, text: 1 });
       });
 
+      test("a memory is found by the words of its note", async (t) => {
+        const hits = await search(t, "balcony");
+        if (!hits) return;
+
+        const noted = hits.find((hit) => hit.id.endsWith("-noted"));
+        assert.ok(noted, "only its note says balcony");
+        assert.deepEqual(noted.ranks, { vector: null, text: 1 });
+        assert.equal(noted.note, "the flat with the big balcony, in Priya's building");
+      });
+
       test("a memory with nothing to read or embed is never a result", async (t) => {
         for (const phrase of Object.keys(phrases)) {
           const hits = await search(t, phrase);
@@ -582,6 +595,7 @@ describe(
           title: "Qualcomm Software Engineering Intern",
           rawText: "https://example.com/jobs/swe-intern-2026",
           extractedText: null,
+          note: null,
           readText: null,
           summary: "Qualcomm software internship, applications close April 30",
           kind: "job posting",

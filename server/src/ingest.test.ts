@@ -59,6 +59,24 @@ describe("parseMemory", () => {
     assert.equal(parsed.memory.rawText, null);
   });
 
+  test("takes the person's note, and a blank one as none", () => {
+    const noted = parseMemory({ ...sent, note: "  from Priya, for the Pune trip " });
+    const blank = parseMemory({ ...sent, note: "   " });
+    const absent = parseMemory(sent);
+
+    assert.ok(noted.ok && blank.ok && absent.ok);
+    assert.equal(noted.memory.note, "from Priya, for the Pune trip");
+    assert.equal(blank.memory.note, null);
+    assert.equal(absent.memory.note, null);
+  });
+
+  test("a note that is not text is refused", () => {
+    const parsed = parseMemory({ ...sent, note: 42 });
+
+    assert.ok(!parsed.ok);
+    assert.deepEqual(parsed.errors, ["note must be a string or null"]);
+  });
+
   test("fields the client made up are dropped rather than stored", () => {
     const parsed = parseMemory({ ...sent, localUri: "file:///secret.jpg", syncState: "SYNCED" });
 
@@ -257,6 +275,43 @@ describe(
 
       assert.equal(asked, 2);
       assert.equal(embedded.length, 2);
+    });
+
+    test("a note is stored and embedded", async () => {
+      await post({ ...sent, note: "Priya said apply before the long weekend" });
+
+      assert.equal((await getMemory(database, sent.id))?.note, "Priya said apply before the long weekend");
+      assert.ok(embedded[0]?.includes("Priya said apply before the long weekend"));
+    });
+
+    test("writing a note later costs an embedding, never a model call", async () => {
+      await post(sent);
+      assert.equal(asked, 1);
+
+      await post({ ...sent, note: "Priya said apply before the long weekend" });
+
+      // the model describes the thing, and the thing has not changed
+      assert.equal(asked, 1, "a note must not send the memory back to the model");
+      assert.equal(embedded.length, 2, "but the note is part of what is embedded");
+      const stored = await getMemory(database, sent.id);
+      assert.equal(stored?.enrichment?.kind, "job posting", "the enrichment is kept");
+    });
+
+    test("a picture with nothing in it but a note is embedded by the note, without a model call", async () => {
+      const response = await post({
+        ...sent,
+        id: "noted-photo",
+        type: "IMAGE",
+        hasLink: false,
+        title: null,
+        rawText: null,
+        extractedText: "",
+        note: "the balcony view from Priya's new flat",
+      });
+
+      assert.deepEqual(await response.json(), { id: "noted-photo", enriched: false, embedded: true });
+      assert.equal(asked, 0, "the picture itself is read by /memories/images, not from its note");
+      assert.deepEqual(embedded, ["the balcony view from Priya's new flat"]);
     });
 
     test("a memory is stored even when the model fails for good, and says why", async () => {

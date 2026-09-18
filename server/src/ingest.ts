@@ -18,6 +18,8 @@ export interface IncomingMemory {
   title: string | null;
   rawText: string | null;
   extractedText: string | null;
+  /** The person's own words about it, added when saving or later. */
+  note: string | null;
   updatedAt: Date;
 }
 
@@ -60,6 +62,7 @@ export function parseMemory(body: unknown): ParseResult {
     title: asText(value["title"], "title", errors),
     rawText: asText(value["rawText"], "rawText", errors),
     extractedText: asText(value["extractedText"], "extractedText", errors),
+    note: asText(value["note"], "note", errors),
   };
 
   if (errors.length > 0 || !capturedAt) return { ok: false, errors };
@@ -120,7 +123,15 @@ function fingerprint(text: string): string {
   return createHash("sha256").update(text).digest("hex").slice(0, 32);
 }
 
-/** Exactly what the extractor is given to read, from either side of a send. */
+/**
+ * Exactly what the extractor is given to read, from either side of a send.
+ *
+ * The note is not part of it. The model describes the thing that was saved;
+ * the note is the person's own words about it, already searchable as they are
+ * -- embedded and word-indexed beside everything else. Keeping it out means
+ * writing or editing a note never costs a model call, and never replaces what
+ * the model saw in a picture with a reading of the note alone.
+ */
 function enrichmentSource(parts: Pick<MemoryDoc, "title" | "rawText" | "extractedText">): string {
   const text = [parts.rawText, parts.extractedText].filter(Boolean).join("\n").trim();
   return [parts.title, text].filter(Boolean).join("\n");
@@ -185,6 +196,7 @@ export async function ingest(
       title: memory.title,
       rawText: memory.rawText,
       extractedText: memory.extractedText,
+      note: memory.note,
       updatedAt: memory.updatedAt,
       // Same words as last time: the model would only tell us what we have.
       ...(reusable ? { enrichment: reusable, enrichedFrom: enrichFrom } : {}),
@@ -197,6 +209,9 @@ export async function ingest(
       enrichFrom,
       // An image whose OCR found nothing, say: 3.6 sends the picture itself.
       enrichable: text.length > 0 || (memory.title?.length ?? 0) > 0,
+      // A note alone gives the model nothing to describe, but it is words to
+      // find the memory by, so it is embedded all the same.
+      embeddable: text.length > 0 || (memory.title?.length ?? 0) > 0 || !!memory.note,
       needsExtraction: !reusable,
       doc,
       reason: undefined as string | undefined,
@@ -244,7 +259,7 @@ export async function ingest(
   // embedded. An unenriched memory is still worth embedding -- its own text is
   // what the phone already shows -- so a failure above does not skip this.
   const toEmbed = pending
-    .filter((item) => item.enrichable)
+    .filter((item) => item.embeddable)
     .map((item) => ({ item, text: embeddingText(item.doc), from: "" }))
     .filter((candidate) => {
       candidate.from = fingerprint(candidate.text);
@@ -296,7 +311,7 @@ export async function ingest(
     id: item.memory.id,
     enriched: !!item.doc.enrichment,
     embedded: !!item.doc.embedding,
-    ...(item.enrichable ? {} : { reason: "nothing to read yet" }),
+    ...(item.embeddable ? {} : { reason: "nothing to read yet" }),
     ...(item.reason === undefined ? {} : { reason: item.reason }),
     ...(item.retryable ? { retryable: true } : {}),
   }));

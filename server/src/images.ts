@@ -110,7 +110,9 @@ export async function ingestImages(
         data: image.data,
         capturedAt: doc.capturedAt,
         sourceAppLabel: doc.sourceAppLabel,
-        text: [doc.rawText, doc.extractedText].filter(Boolean).join("\n"),
+        // the note is context for reading the picture, though it never
+        // triggers a reading of its own (see enrichmentSource in ingest.ts)
+        text: [doc.note, doc.rawText, doc.extractedText].filter(Boolean).join("\n"),
       })),
     );
 

@@ -29,8 +29,14 @@ export interface MemoryDoc {
   sourceAppLabel?: string | null;
   title?: string | null;
   rawText?: string | null;
-  /** What on-device OCR read (step 2.1). */
+  /** What the phone read out of it: OCR on a picture (step 2.1), a PDF's text, a link's page. */
   extractedText?: string | null;
+  /**
+   * The person's own words about it, written when saving or afterwards.
+   * Embedded and word-indexed, but never given to the model to describe: see
+   * `enrichmentSource` in ingest.ts.
+   */
+  note?: string | null;
   /** The phone's last change to the row. */
   updatedAt: Date;
   /** Server clock, set on every write here. */
@@ -151,6 +157,7 @@ export const TEXT_INDEX = "memories_text";
 /** Every field a memory's words live in. Searched together, one score across all. */
 export const TEXT_PATHS = [
   "title",
+  "note",
   "rawText",
   "extractedText",
   "enrichment.summary",
@@ -180,6 +187,7 @@ export function textIndexDefinition() {
       dynamic: false,
       fields: {
         title: { type: "string" },
+        note: { type: "string" },
         rawText: { type: "string" },
         extractedText: { type: "string" },
         enrichment: {

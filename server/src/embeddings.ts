@@ -90,19 +90,21 @@ export function cosine(a: number[], b: number[]): number {
  * What gets embedded, and in what order.
  *
  * Gemini's summary and the entities come first: they say what the thing is in
- * the words someone would search with, and they survive the cap. The source
- * app is deliberately absent -- provenance is a filter (step 4.3), and mixing
- * "WhatsApp" into the meaning of every message would pull unrelated saves
- * together.
+ * the words someone would search with, and they survive the cap. The note is
+ * near the front for the same reason -- it is how the person themselves
+ * described it. The source app is deliberately absent -- provenance is a
+ * filter (step 4.3), and mixing "WhatsApp" into the meaning of every message
+ * would pull unrelated saves together.
  */
 export function embeddingText(
-  memory: Pick<MemoryDoc, "title" | "rawText" | "extractedText" | "enrichment">,
+  memory: Pick<MemoryDoc, "title" | "rawText" | "extractedText" | "enrichment" | "note">,
 ): string {
   const enrichment = memory.enrichment;
   return [
     enrichment?.summary,
     enrichment?.kind,
     memory.title,
+    memory.note,
     enrichment?.entities?.join(", "),
     // what the model saw in the picture, when it was read as one (3.6)
     enrichment?.readText,
