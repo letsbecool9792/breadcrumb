@@ -1,7 +1,17 @@
 package com.lbc.breadcrumb.ui.home
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -79,6 +89,8 @@ internal fun Mosaic(
     kept: String,
     /** Held by the screen, so the mosaic keeps its place across a search. */
     grid: LazyStaggeredGridState,
+    /** Held by the screen too, so a search and back does not replay what was shown. */
+    entrances: MosaicEntrances,
     onOpenDebug: (() -> Unit)?,
     onOpen: (Memory) -> Unit,
 ) {
@@ -92,6 +104,7 @@ internal fun Mosaic(
         return
     }
 
+    entrances.settle(memories.map { it.id })
     var mastheadHeight by remember { mutableIntStateOf(0) }
     val collapse by remember {
         derivedStateOf { mastheadCollapse(grid.firstVisibleItemIndex, grid.firstVisibleItemScrollOffset, mastheadHeight) }
@@ -109,8 +122,20 @@ internal fun Mosaic(
             item(key = MASTHEAD_KEY, span = StaggeredGridItemSpan.FullLine) {
                 Masthead(kept, onOpenDebug, Modifier.onSizeChanged { mastheadHeight = it.height })
             }
-            items(memories, key = { it.id }) { memory ->
-                Tile(memory, now, onClick = { onOpen(memory) })
+            itemsIndexed(memories, key = { _, memory -> memory.id }) { index, memory ->
+                Tile(
+                    memory = memory,
+                    now = now,
+                    onClick = { onOpen(memory) },
+                    modifier = Modifier
+                        // a deleted tile fades, and the tiles around it close the gap
+                        .animateItem(
+                            fadeInSpec = null,
+                            placementSpec = spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntOffset.VisibilityThreshold),
+                            fadeOutSpec = tween(200),
+                        )
+                        .entering(memory.id, index, entrances),
+                )
             }
         }
         if (collapse > 0f) CollapsedMasthead(kept, shown = collapse, Modifier.align(Alignment.TopCenter))
@@ -120,10 +145,98 @@ internal fun Mosaic(
 
 private const val MASTHEAD_KEY = "masthead"
 
+/** How a tile first comes into the mosaic. */
+internal enum class Entrance {
+    /** Already shown: no entrance. */
+    NONE,
+
+    /** There when the app opened: rises into place with the others, in a quick stagger. */
+    RISE,
+
+    /** Saved -- or brought back by Undo -- while the mosaic was up: drops in from above with the crumb's bounce. */
+    DROP,
+}
+
+/**
+ * What the mosaic has already shown, and what it held when it first drew.
+ * Kept by the screen, so a search and back does not replay the opening.
+ */
+internal class MosaicEntrances(private val openedAt: Long = System.currentTimeMillis()) {
+    private val seen = mutableSetOf<String>()
+    private var first: MutableSet<String>? = null
+
+    /**
+     * Called with every list the mosaic draws. The first one is what the app
+     * opened on; a memory that leaves the list is forgotten, so if it comes
+     * back -- an Undo -- it arrives as new.
+     */
+    fun settle(ids: List<String>) {
+        val present = ids.toSet()
+        if (first == null) first = present.toMutableSet()
+        seen.retainAll(present)
+        first?.retainAll(present)
+    }
+
+    fun entranceFor(id: String): Entrance = when {
+        id in seen -> Entrance.NONE
+        first?.contains(id) != false -> Entrance.RISE
+        else -> Entrance.DROP
+    }
+
+    fun shown(id: String) {
+        seen += id
+    }
+
+    /** Only the opening staggers; a tile first drawn later, by a scroll, just fades up. */
+    fun opening(now: Long = System.currentTimeMillis()) = now - openedAt < OPENING_MS
+
+    private companion object {
+        const val OPENING_MS = 1_500L
+    }
+}
+
+/** The crumb's bounce, as the capture sheet drops it. */
+private val CrumbBounce = CubicBezierEasing(0.34f, 1.4f, 0.64f, 1f)
+
 @Composable
-private fun Tile(memory: Memory, now: Long, onClick: () -> Unit) {
+private fun Modifier.entering(id: String, index: Int, entrances: MosaicEntrances): Modifier {
+    val entrance = remember { entrances.entranceFor(id) }
+    val progress = remember { Animatable(if (entrance == Entrance.NONE) 1f else 0f) }
+    LaunchedEffect(id) {
+        if (entrance == Entrance.NONE) return@LaunchedEffect
+        entrances.shown(id)
+        when (entrance) {
+            Entrance.RISE -> {
+                if (entrances.opening()) delay(45L * index.coerceAtMost(10))
+                progress.animateTo(1f, tween(440, easing = FastOutSlowInEasing))
+            }
+            Entrance.DROP -> progress.animateTo(1f, tween(640, easing = CrumbBounce))
+            Entrance.NONE -> Unit
+        }
+    }
+    return graphicsLayer {
+        val p = progress.value
+        when (entrance) {
+            Entrance.RISE -> {
+                alpha = p
+                translationY = (1f - p) * 22.dp.toPx()
+            }
+            Entrance.DROP -> {
+                alpha = (p * 2.4f).coerceAtMost(1f)
+                translationY = (1f - p) * -40.dp.toPx()
+                val scale = 0.84f + 0.16f * p
+                scaleX = scale
+                scaleY = scale
+            }
+            Entrance.NONE -> Unit
+        }
+    }
+}
+
+@Composable
+private fun Tile(memory: Memory, now: Long, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
             .clip(TileShape)
             .background(InkElevated)
