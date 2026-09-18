@@ -180,7 +180,7 @@ private fun UndoBar(removed: Memory?, onUndo: () -> Unit) {
             )
             Text(
                 text = stringResource(R.string.undo_action),
-                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AmberBright),
+                style = sans(14.sp, AmberBright, FontWeight.SemiBold),
                 modifier = Modifier
                     .clip(RoundedCornerShape(18.dp))
                     .clickable(onClick = onUndo)

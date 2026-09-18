@@ -33,7 +33,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,13 +45,12 @@ import com.lbc.breadcrumb.data.Memory
 import com.lbc.breadcrumb.data.MemoryType
 import com.lbc.breadcrumb.ui.common.DocumentGlyph
 import com.lbc.breadcrumb.ui.common.OriginalPreview
+import com.lbc.breadcrumb.ui.theme.Mono
+import com.lbc.breadcrumb.ui.theme.Serif
 import com.lbc.breadcrumb.ui.common.loadOriginalPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// Placeholder for the design's IBM Plex Mono. Bundling the brand faces is its
-// own decision; the mono/sans split is what matters and the system mono keeps it.
-private val Mono = FontFamily.Monospace
 
 private val CardShape = RoundedCornerShape(16.dp)
 
@@ -100,8 +98,9 @@ private fun Header(state: CaptureUiState, saved: List<Memory>) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 text = title(state),
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontFamily = Serif,
+                fontSize = 27.sp,
+                lineHeight = 29.sp,
                 color = colors.onSurface,
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
@@ -264,9 +263,9 @@ private fun DocumentPreview(preview: CapturePreview.Document) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
                 Text(
                     text = preview.title ?: stringResource(R.string.capture_document),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    lineHeight = 21.sp,
+                    fontFamily = Serif,
+                    fontSize = 20.sp,
+                    lineHeight = 22.sp,
                     color = colors.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -314,9 +313,9 @@ private fun LinkPreview(preview: CapturePreview.Link) {
         }
         Text(
             text = preview.headline,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium,
-            lineHeight = 22.sp,
+            fontFamily = Serif,
+            fontSize = 21.sp,
+            lineHeight = 23.sp,
             color = colors.onSurface,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
