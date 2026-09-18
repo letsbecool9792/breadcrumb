@@ -53,7 +53,7 @@ Pin explicit Gemini model versions in code. The `gemini-flash-latest` alias exis
 
 ### The free tier is the design constraint
 
-**No billing.** Decided 2026-09-17, after a day's testing hit the wall. What the free tier allows, per model per day:
+**No billing.** Decided 2026-09-17, after a day's testing hit the wall. What the free tier allows, **per model per project** — each model has its own allowance:
 
 | Model | RPM | RPD |
 |---|---|---|
@@ -62,14 +62,18 @@ Pin explicit Gemini model versions in code. The `gemini-flash-latest` alias exis
 | Gemini Embedding 1 and 2 | 100 | 1000 |
 | Gemma 4 26B / 31B | 30 | 14,400 |
 
-So ingest runs on **Flash Lite**, and everything is built to spend requests, not memories:
+Confirmed 2026-09-18 from the Cloud Console quota page (3.5 and 3.1 Flash Lite 500/day each, embedding 1,000/day and 100/min), and 3.8 Flash's 20 from a real 429. **Where to check:** AI Studio's rate-limit page now shows only per-minute limits; the daily ones are at `console.cloud.google.com/apis/api/generativelanguage.googleapis.com/quotas` (the key's project), filtered on "free tier". Daily limits reset at midnight Pacific.
+
+**Ingest runs on 3.5 Flash Lite and query parsing on 3.1 Flash Lite**, so the two never share one 500. Everything is built to spend requests, not memories:
 
 - **Batch.** One call reads ten memories; embeddings take an array too. 500 seed items is ~50 requests.
 - **Never pay twice.** Fingerprints of what the model read mean a retry or a re-send costs nothing.
 - **Ask only when there is something new to read.** An image waits for OCR; a memory with no text is stored without a model call at all.
 - **Send a picture only when OCR could not read it** (under 80 characters). Images cost ~1,000 prompt tokens each even when tiny, roughly ten times the text beside them, so a text-heavy screenshot is left to its words. Pictures go downscaled, four to a request, once each.
 
-Gemma's 14,400/day is the escape hatch if 500 ever binds, though it likely has no structured output. Check current limits at `aistudio.google.com/rate-limit` with "All models" on.
+- **A search phrase is parsed once a day.** The same phrase against the same apps on the same day reuses its parse; a parse that fails costs the search only its filters.
+
+Gemma's 14,400/day is the escape hatch if 500 ever binds, though it likely has no structured output.
 
 ### Rejected: React Native
 
@@ -191,7 +195,9 @@ npm run typecheck
 - **OCR must ask for an upload pass after *every* read, including one that found nothing.** Images are held back until OCR has looked at them, and an empty read is the very case whose picture gets sent — skip the signal and those photos wait for the next save or launch.
 - **A missing search index is not an error.** `$vectorSearch` or `$search` against an index that does not exist answers an empty list, so hybrid search quietly becomes one-half search. Startup creates both indexes and says so; if results look like only meaning or only words, check the indexes before the query.
 - **M0 holds three search indexes per *cluster*** (confirmed 2026-09-18: a third was refused with "maximum number of FTS indexes"). A new one takes ~30s to become queryable. The real collection uses two.
-- **The search tests borrow the real indexes** — decided 2026-09-18, because a test pair plus the real pair would make four. The rules that keep it safe: every test document carries `sourceAppLabel: "breadcrumb-test"` and a fixed id; every search in the tests filters on that label **in both halves**; cleanup deletes only those ids while they still carry the label; nothing drops, empties or updates anything else. Move them to a second free cluster when deploying.
+- **The search tests borrow the real indexes** — decided 2026-09-18, because a test pair plus the real pair would make four. The rules that keep it safe: every test document has a fixed id starting `breadcrumb-test-` (no UUID can); every search in the tests is narrowed to those ids through the `_id` filter field, **in both halves**; cleanup deletes those ids and nothing else; nothing drops, empties or updates anything else. Move them to a second free cluster when deploying.
+- **Startup updates a search index only when it lacks a declared field** (`ensureSearchIndex`, via `declaredPaths`). Atlas reports definitions back with its own defaults, so comparing whole definitions would rebuild at every start. A changed analyzer or field type is applied by hand. While an update builds, the old version answers, and a filter on the new field errors until it is done.
+- **Dates filter on `datedAt`** — when a picture was taken, else when it was saved — derived at ingest and backfilled at startup. Days are placed on the server's own calendar: right in development, where the server runs on the phone owner's machine; a deployed server needs the phone's time zone.
 - **A search filter must narrow both halves** (`searchPipeline`): MQL in `$vectorSearch.filter`, a compound `filter` in `$search`. Narrow only one and the other brings back what was filtered out.
 - **Search results are an allow-list projection** (`searchPipeline`). The text goes back whole; the vector never leaves. A field added to the document stays in the cloud until it is listed.
 - **PowerShell 5.1 strips double quotes from arguments to native programs**, here-strings included, so a `git commit -m` message containing `"` splits into pathspecs. Commit with `git commit -F <file>`.
@@ -451,12 +457,24 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
       · halves weigh the same; each result carries `ranks: {vector, text}`, the "why this
         matched" for now. Tune the weights with phase 5's corpus, not before
       · checked by the user with curl against the real collection
-- [~] **4.3** Flash-Lite query parsing → type and date filters (rule #6)
+- [x] **4.3** Flash-Lite query parsing → type and date filters (rule #6)
+      · *test:* `npm test` in `server/` — the parser's guards (made-up types, impossible dates,
+        unknown apps dropped), the filter in both halves' languages, the day-long parse cache;
+        three live parses on `gemini-3.1-flash-lite`; and against the real indexes: type and
+        month together, dates by when a picture was taken, all-filter listing with no embedding,
+        only the leftover words embedded, a failed parse still searching
       · *test:* *"screenshot from April"* filters by both type and month
       · *test:* *"that link from WhatsApp"* also finds photos whose caption carried a link
         (filter on `type = LINK OR hasLink`)
       · parsing must also extract a **source app** filter, matched against
         `sourceAppLabel` — provenance is a filter, never mixed into embedded text
+      · the source app is an enum of the labels memories carry, so the model cannot invent one
+      · rule 6's `entity_hints` left out: nothing would use them, since the text half already
+        matches names exactly (4.4)
+      · the answer reports its `interpretation`, so a searcher can see why the list is what it is
+      · **a new phrase takes ~2–3s**: the parse (1.3–2.3s) runs before the embedding. At 4.2,
+        embed the raw phrase in parallel and reuse it when the parse leaves it unchanged
+      · tested by the user with curl against the real collection
 - [ ] **4.2** Real search UI, replacing the debug list
       · *test:* type a query on device, see ranked results
       · **deletes do not sync**, so the server holds memories the phone has deleted (16 there
