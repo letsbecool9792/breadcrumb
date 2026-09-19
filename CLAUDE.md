@@ -616,7 +616,7 @@ being mistaken for a scan (fixed). Follow-ups from trying them are 4.11, committ
       · *test:* `OriginalsTest` and on-device `OriginalsProviderTest` (sharing), `ResultTextTest`
         (the status line)
       · 4.7-4.10 verified on device by the user, 2026-09-19
-- [~] **4.11** From trying 4.7-4.10 — committed on main, awaiting the user's check
+- [x] **4.11** From trying 4.7-4.10 — committed on main
       · "ig link" / "link from instagram" found only links shared *from the Instagram app*; it
         now also finds an Instagram link sent on WhatsApp or copied (a source is an app or a
         site, see the gotcha). The indexes gain `linkSites`; startup adds it and backfills
@@ -630,6 +630,11 @@ being mistaken for a scan (fixed). Follow-ups from trying them are 4.11, committ
         live parse of "ig link". `./gradlew testDebugUnitTest` — `DraftCodecTest`,
         `OriginalsTest` (the note with each kind); on-device `DraftStoreTest`,
         `OriginalsProviderTest` (the caption on the share)
+      · verified on device by the user, 2026-09-19: an Instagram link sent on WhatsApp found
+        by "ig link", the draft back after the app was closed, the note going with a share
+
+**Phase 4 closed 2026-09-19.** Every step verified on the phone. Phase 5 is next and not
+started.
 
 ### Phase 5 — Seeding
 
