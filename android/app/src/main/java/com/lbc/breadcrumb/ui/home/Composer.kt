@@ -74,6 +74,7 @@ import com.lbc.breadcrumb.ui.theme.AmberBright
 import com.lbc.breadcrumb.ui.theme.AmberOnContainer
 import com.lbc.breadcrumb.ui.theme.Bone
 import com.lbc.breadcrumb.ui.theme.BoneDim
+import com.lbc.breadcrumb.ui.theme.Ink
 import com.lbc.breadcrumb.ui.theme.InkBorder
 import com.lbc.breadcrumb.ui.theme.InkElevated
 import com.lbc.breadcrumb.ui.theme.InkFieldBorder
@@ -305,23 +306,41 @@ private fun PictureGlyph(color: Color) {
 /**
  * The "+" beside the search field: the way to keep something without leaving
  * the app. Amber, the one warm thing on the ink besides the search's light.
+ *
+ * @param waiting a draft is waiting in the sheet -- marked by a small dot,
+ *   since a draft now outlives the app being closed and could be forgotten.
  */
 @Composable
-internal fun KeepSomethingButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val label = stringResource(R.string.compose_open)
-    Box(
-        modifier
-            .size(54.dp)
-            .clip(CircleShape)
-            .background(AmberBright)
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.size(18.dp)) {
-            val stroke = 2.2.dp.toPx()
-            drawLine(AmberOnContainer, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), stroke, StrokeCap.Round)
-            drawLine(AmberOnContainer, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), stroke, StrokeCap.Round)
+internal fun KeepSomethingButton(onClick: () -> Unit, waiting: Boolean, modifier: Modifier = Modifier) {
+    val label = stringResource(if (waiting) R.string.compose_open_draft else R.string.compose_open)
+    Box(modifier.size(54.dp)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .background(AmberBright)
+                .clickable(onClick = onClick)
+                .semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.size(18.dp)) {
+                val stroke = 2.2.dp.toPx()
+                drawLine(AmberOnContainer, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), stroke, StrokeCap.Round)
+                drawLine(AmberOnContainer, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), stroke, StrokeCap.Round)
+            }
+        }
+        if (waiting) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 3.dp, end = 3.dp)
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(Ink)
+                    .padding(2.5.dp)
+                    .clip(CircleShape)
+                    .background(Bone),
+            )
         }
     }
 }

@@ -108,12 +108,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     /**
-     * What is in that sheet. Kept when it is swiped away, so a thought half
-     * written is there when it opens again; emptied only once it is kept.
+     * What is in that sheet. Kept when it is swiped away, and on disk
+     * ([DraftStore]) so it survives the app being closed; emptied only once
+     * it is kept.
      */
     var draft by mutableStateOf("")
         private set
     val attachments = mutableStateListOf<Attachment>()
+    private val drafts = DraftStore(app)
 
     var keeping by mutableStateOf(false)
         private set
@@ -140,6 +142,21 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 // a new keystroke abandons the search in flight, server call included
                 .collectLatest(::run)
         }
+
+        // the draft a closed app left behind, off the main thread
+        viewModelScope.launch {
+            val stored = withContext(Dispatchers.IO) { drafts.load() }
+            // anything typed in the moment it took wins
+            if (draft.isEmpty() && attachments.isEmpty()) {
+                draft = stored.text
+                attachments += stored.attachments.map { Attachment(Uri.parse(it.uri), it.name, it.isPdf) }
+            }
+        }
+    }
+
+    /** Writes the draft down as it stands. Cheap: SharedPreferences writes in the background. */
+    private fun rememberDraft() {
+        drafts.save(Draft(draft, attachments.map { DraftFile(it.uri.toString(), it.name, it.isPdf) }))
     }
 
     fun onQueryChange(text: String) {
@@ -181,6 +198,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onDraftChange(text: String) {
         draft = text
+        rememberDraft()
     }
 
     /** Files picked in the sheet, named for their tiles. A file picked twice is there once. */
@@ -198,12 +216,18 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                     Attachment(uri, name, isPdf = type == "application/pdf")
                 }
             }
-            picked.filter { new -> attachments.none { it.uri == new.uri } }.let(attachments::addAll)
+            val new = picked.filter { candidate -> attachments.none { it.uri == candidate.uri } }
+            // readable past this run too, since the draft may outlive it
+            withContext(Dispatchers.IO) { new.forEach { drafts.keepReadable(it.uri) } }
+            attachments += new
+            rememberDraft()
         }
     }
 
     fun detach(attachment: Attachment) {
         attachments.remove(attachment)
+        drafts.letGo(attachment.uri)
+        rememberDraft()
     }
 
     /**
@@ -224,8 +248,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 if (saved.isEmpty()) {
                     keepFailed = true
                 } else {
+                    // the files are copied in now; their grants are no longer needed
+                    files.forEach { drafts.letGo(it.uri) }
                     draft = ""
                     attachments.clear()
+                    rememberDraft()
                     writing = false
                     UploadWorker.schedule(app)
                 }

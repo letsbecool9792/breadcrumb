@@ -254,7 +254,11 @@ private fun Screen(
                     enter = fadeIn(tween(180)) + expandHorizontally(tween(220)),
                     exit = fadeOut(tween(120)) + shrinkHorizontally(tween(200)),
                 ) {
-                    KeepSomethingButton(onClick = viewModel::startWriting, modifier = Modifier.padding(start = 10.dp))
+                    KeepSomethingButton(
+                        onClick = viewModel::startWriting,
+                        waiting = viewModel.draft.isNotBlank() || viewModel.attachments.isNotEmpty(),
+                        modifier = Modifier.padding(start = 10.dp),
+                    )
                 }
             }
         }
