@@ -143,6 +143,7 @@ On `ACTION_SEND`, record the calling package via `Activity.getReferrer()`. That 
 - **Nothing calls OCR.** `OcrQueue` starts in `BreadcrumbApp.onCreate` — every process, capture included — and watches Room for unread images and PDFs. Any code that inserts IMAGE or PDF rows, the 5.1 importer included, gets them read without doing anything. Links are read the same way, by the upload worker's first step.
 - **A PDF is read by its text layer on Android 15+** (`PdfRenderer.Page.getTextContents`, API 35), and by OCR of its first six pages when there is none — a scan — or on older Android. Up to 20,000 characters are kept (`PdfRules`); the server's model reads the first 4,000 and embeds 6,000, the word indexes take it all. A PDF behind a password reads as empty.
 - **A link's page is read from the phone, never the server** (`PageReader`, `LinkReading`): the person's own connection, as when they open it, and the server never fetches arbitrary URLs. Only the head, up to `</head>` or 512 KB; plain http goes as https; never localhost or a bare IP. Every answer is final — an error page, a login wall's title, a dead link while online — except losing the network, which leaves the link for the next pass. The page title becomes `title` only when the memory has none (a Chrome share brings its own).
+- **The "+" sheet's draft lives on disk** (`DraftStore`, SharedPreferences), so it survives the app closing. A picked file is only a URI, so each is given a persistable read grant when picked and let go once kept or removed; a file whose grant did not last is dropped on load. Android caps an app's persisted grants (512), which is why they are released rather than kept.
 - **A capture sheet holds its memories back from upload until it goes** (`BreadcrumbApp.uploadHolds`, passed over by `pendingUploads`), so a note written in it costs no second send. Released on dismiss, on leaving for another app, and on destroy — a hold that is never released strands a memory until the process dies.
 - **ML Kit reports usage to Google — accepted, 2026-09-15.** Its logging queue shows up as `databases/com.google.android.datatransport.events` in app storage. What it sends is SDK usage and performance data, not images or recognized text, so rule 1's stance holds: originals and their text stay on the device. Accepted rather than stripped, since removing the transport service by manifest merge is unsupported and could break on an ML Kit update. Revisit if the privacy stance tightens.
 - **A Text given a style takes nothing from the theme**, so every style names its face — use the helpers in `ui/home/HomeType.kt` (`serif`, `sans`, `monoStyle`), never a bare `TextStyle(fontSize = …)`, which falls back to the platform font. Text given only loose parameters (as the capture sheet's are) inherits Material's type scale, which is set in Instrument Sans.
@@ -198,7 +199,8 @@ npm run typecheck
 - **The ingest request is parsed field by field and unknown fields are dropped**, so `localUri` cannot reach the cloud whatever the client sends (rule 1). A test is named for it.
 - **`gemini-embedding-001` only returns unit-length vectors at its full 3072 dims.** At 768 they must be L2-normalised before storage, or cosine similarity measures length as much as meaning. Anything that produces an embedding — ingest, and query embedding at 4.1 — normalises.
 - **Documents and search phrases are embedded under different task types** (`RETRIEVAL_DOCUMENT`, `RETRIEVAL_QUERY`). Using one for both quietly costs retrieval quality.
-- **A vector index's filter fields must be declared up front.** `memories_vector` declares `type`, `hasLink`, `capturedAt` and `sourceAppLabel` for 4.3; adding another later means rebuilding the index. `memories_text` declares the same four. **Startup never updates an existing index**, only creates a missing one: a changed definition is applied deliberately (`updateSearchIndex` or the Atlas UI), since every update rebuilds.
+- **A vector index's filter fields must be declared up front.** `memories_vector` declares `type`, `hasLink`, `capturedAt`, `sourceAppLabel`, `datedAt`, `linkSites` and `_id`; `memories_text` declares the same. Adding one means rebuilding the index — startup does it when a field is missing (see below), and a filter on the new field errors until the rebuild is done.
+- **A source is an app or a site** (`sources.ts`). "That link from Instagram" matches a memory shared from the Instagram app *or* one whose link points to instagram.com, however it arrived. `linkSites` holds the registrable domains of a memory's shared links, derived at ingest and backfilled at startup; sites are named as people say them (instagram.com and instagr.am are "Instagram", youtu.be "YouTube", twitter.com "X"), anything unlisted by its first label. The parser is offered app labels plus the 40 most linked-to site names, one name when an app and its site share it.
 - **`FAILED` means the server refused a memory**, and is not retried automatically: the same bytes would be refused again. Transient failures go back to `PENDING` instead, and the debug Sync button queues refused ones again.
 - **Every delete goes through `MemoryDao.deleteEverywhere`**, never `delete` alone: it removes the row and records a `pending_deletes` entry in one transaction, and the upload queue sends those first. A delete that stays on the phone leaves the memory's text and vector in Atlas. The debug list's **Clear** deletes everything on the server too.
 - **`Memory.enrichedAt` null means "ask the server"** for its reading. `markSynced` and `markImageSent` clear it — every send may have been read again — and the queue's last step copies summary, kind and readText back. Every id asked about is marked, answer or not, so the pass cannot loop.
@@ -209,6 +211,7 @@ npm run typecheck
 - **A missing search index is not an error.** `$vectorSearch` or `$search` against an index that does not exist answers an empty list, so hybrid search quietly becomes one-half search. Startup creates both indexes and says so; if results look like only meaning or only words, check the indexes before the query.
 - **M0 holds three search indexes per *cluster*** (confirmed 2026-09-18: a third was refused with "maximum number of FTS indexes"). A new one takes ~30s to become queryable. The real collection uses two.
 - **The search tests borrow the real indexes** — decided 2026-09-18, because a test pair plus the real pair would make four. The rules that keep it safe: every test document has a fixed id starting `breadcrumb-test-` (no UUID can); every search in the tests is narrowed to those ids through the `_id` filter field, **in both halves**; cleanup deletes those ids and nothing else; nothing drops, empties or updates anything else. Move them to a second free cluster when deploying.
+- **Every test memory is searched by every test phrase.** A word slipped into a new seeded memory — even in a URL, as `instagram.com/p/lake-trip` did — is found by an older test's phrase ("trip to japan") and ties its ranking. Give seeded URLs id-like paths.
 - **Startup updates a search index only when it lacks a declared field** (`ensureSearchIndex`, via `declaredPaths`). Atlas reports definitions back with its own defaults, so comparing whole definitions would rebuild at every start. A changed analyzer or field type is applied by hand. While an update builds, the old version answers, and a filter on the new field errors until it is done.
 - **Dates filter on `datedAt`** — when a picture was taken, else when it was saved — derived at ingest and backfilled at startup. Days are placed on the server's own calendar: right in development, where the server runs on the phone owner's machine; a deployed server needs the phone's time zone.
 - **A search filter must narrow both halves** (`searchPipeline`): MQL in `$vectorSearch.filter`, a compound `filter` in `$search`. Narrow only one and the other brings back what was filtered out.
@@ -558,9 +561,11 @@ that would feel broken for exactly what people type. 4.3 adds its filters to bot
 **Before seeding, 2026-09-18:** the user asked for two ways in (4.7, 4.8), for the two gaps
 phase 5 would expose — a bare link carries only its URL, a PDF only its filename — to be
 closed (4.9), and for seven small fixes (4.10). Built on the `pre-seeding` branch, one commit
-per piece; the user checks it all on the phone and merges.
+per piece, checked on the phone by the user and merged; the on-device suite (123 tests) and the
+server's (134) ran against the real phone and Atlas first, and caught a short PDF's text layer
+being mistaken for a scan (fixed). Follow-ups from trying them are 4.11, committed on main.
 
-- [~] **4.7** A note on a save — built, awaiting the user's check on the phone
+- [x] **4.7** A note on a save
       · the capture sheet's quiet "add a note" opens a field (closed by default: saving stays
         one tap); the note goes on every memory the share saved, when the sheet goes
       · `Memory.note`, schema v7 (the word index gains it and is rebuilt); kept apart from
@@ -574,7 +579,7 @@ per piece; the user checks it all on the phone and merges.
         `ServerClientTest` (the payload carries it); on-device `MemoryDaoTest` (found by local
         search, re-queues, unchanged is no change) and `MemoryUploaderTest` (held while the
         sheet is open)
-- [~] **4.8** The "+": keeping something from inside the app — built, awaiting the check
+- [x] **4.8** The "+": keeping something from inside the app
       · an amber "+" beside the search field (hidden while searching) opens a `SheetLayer`:
         one box to write in, a photo (system photo picker, no permission) or PDF to go with
         it. No title, no formatting — not a notes app
@@ -583,22 +588,26 @@ per piece; the user checks it all on the phone and merges.
         being swiped away
       · a launcher shortcut, "Keep something", opens it straight from the app icon
       · *test:* on-device `WrittenCaptureTest`; the picking and saving of files on the phone
-- [~] **4.9** Reading what was saved: PDFs' text and links' pages — built, awaiting the check
+- [x] **4.9** Reading what was saved: PDFs' text and links' pages
       · a PDF is read on the phone: its text layer on Android 15+, OCR of its first pages
         otherwise; every PDF already saved is read on the next launch and sent again
       · a link's page is read on the phone by the upload worker's first step: its title (when
         the memory has none) and description, so a link copied bare from a chat is found by
         what it was about. Links already saved are read on the next pass
       · both ride the ordinary batched upload: no request of their own
+      · a thin text layer is read by OCR too, and kept unless OCR found clearly more: a
+        one-line PDF was taken for a scan and misread ("ACME VWidgets") until then
+      · verified on device: the PDF and both bare links already saved were read on the first
+        run after installing, and synced
       · *test:* `./gradlew testDebugUnitTest` — `PdfRulesTest`, `PageMetaTest`,
         `PageReaderTest` (against a local server); on-device `PdfReaderTest` (a PDF with a text
         layer, and a scan, both drawn by the test), `OcrQueueTest`, `LinkReadingTest`,
         `MemoryUploaderTest` (fresh PDFs and links held while unread)
-- [~] **4.10** Seven small fixes — built, awaiting the check
+- [x] **4.10** Seven small fixes
       · a drag on the results or the mosaic puts the keyboard away
       · tapping the slim "breadcrumb" strip goes back to the top of the mosaic
-      · share a memory onward from its detail: the file, the URL alone, or the note's words;
-        Breadcrumb itself left out of the share sheet
+      · share a memory onward from its detail: the file, the URL, or a note's words, with the
+        person's note (since 4.11); Breadcrumb itself left out of the share sheet
       · the note shown in the detail and editable there — only the note, never the memory
       · the launcher shortcut (4.8)
       · sheets follow the predictive back gesture
@@ -606,6 +615,21 @@ per piece; the user checks it all on the phone and merges.
         not sent yet (so found by words only), refused
       · *test:* `OriginalsTest` and on-device `OriginalsProviderTest` (sharing), `ResultTextTest`
         (the status line)
+      · 4.7-4.10 verified on device by the user, 2026-09-19
+- [~] **4.11** From trying 4.7-4.10 — committed on main, awaiting the user's check
+      · "ig link" / "link from instagram" found only links shared *from the Instagram app*; it
+        now also finds an Instagram link sent on WhatsApp or copied (a source is an app or a
+        site, see the gotcha). The indexes gain `linkSites`; startup adds it and backfills
+      · the "+" draft survives the app being closed, picked files included; a dot on the "+"
+        says one is waiting
+      · sharing onward carries the note: a photo's caption, the line before a link, after a
+        thought's words
+      · *test:* `npm test` in `server/` — `sources.test.ts` (sites and their names), the source
+        filter in both halves' languages, the parser offered site names, and against the real
+        indexes an Instagram link sent on Telegram found beside one shared from Instagram; a
+        live parse of "ig link". `./gradlew testDebugUnitTest` — `DraftCodecTest`,
+        `OriginalsTest` (the note with each kind); on-device `DraftStoreTest`,
+        `OriginalsProviderTest` (the caption on the share)
 
 ### Phase 5 — Seeding
 
