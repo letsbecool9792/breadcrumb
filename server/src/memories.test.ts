@@ -4,6 +4,7 @@ import type { Db } from "mongodb";
 import { closeMongo, connectMongo, databaseName, db } from "./db.ts";
 import {
   backfillDatedAt,
+  backfillLinkSites,
   datedAt,
   declaredPaths,
   ensureIndexes,
@@ -39,7 +40,7 @@ describe("vectorIndexDefinition", () => {
       .fields.filter((field) => field.type === "filter")
       .map((field) => field.path);
 
-    assert.deepEqual(filters, ["type", "hasLink", "capturedAt", "sourceAppLabel", "datedAt", "_id"]);
+    assert.deepEqual(filters, ["type", "hasLink", "capturedAt", "sourceAppLabel", "datedAt", "linkSites", "_id"]);
   });
 
   test("the text index can filter on the same fields, so both halves narrow alike", () => {
@@ -172,6 +173,19 @@ describe(
       assert.deepEqual((await getMemory(database, "photo"))?.datedAt, sample.contentCreatedAt);
       assert.deepEqual((await getMemory(database, "note"))?.datedAt, sample.capturedAt);
       assert.equal(await backfillDatedAt(database), 0, "a second run has nothing left to do");
+    });
+
+    test("memories stored before linkSites existed are given theirs, once", async () => {
+      await memories(database).insertMany([
+        { ...sample, _id: "reel", rawText: "lol https://www.instagram.com/reel/abc" },
+        { ...sample, _id: "plain", rawText: "no link in this one" },
+      ] as never[]);
+
+      assert.equal(await backfillLinkSites(database), 2);
+      assert.deepEqual((await getMemory(database, "reel"))?.linkSites, ["instagram.com"]);
+      // an empty list, not a missing field: the next run must not look at it again
+      assert.deepEqual((await getMemory(database, "plain"))?.linkSites, []);
+      assert.equal(await backfillLinkSites(database), 0, "a second run has nothing left to do");
     });
 
     test("recent memories come back newest first", async () => {

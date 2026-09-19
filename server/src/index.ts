@@ -5,6 +5,7 @@ import { geminiExtractor, geminiImageExtractor, INGEST_MODEL } from "./gemini.ts
 import { geminiQueryParser, QUERY_MODEL } from "./query.ts";
 import {
   backfillDatedAt,
+  backfillLinkSites,
   ensureIndexes,
   ensureTextIndex,
   ensureVectorIndex,
@@ -36,6 +37,8 @@ try {
   console.log(`mongodb connected, database "${databaseName()}"`);
   const dated = await backfillDatedAt(db());
   if (dated > 0) console.log(`dated ${dated} memories stored before datedAt existed`);
+  const sited = await backfillLinkSites(db());
+  if (sited > 0) console.log(`found the link sites of ${sited} memories stored before linkSites existed`);
 
   // both halves of hybrid search (rule 5)
   const vector = await ensureVectorIndex(db(), EMBEDDING_DIMENSIONS);

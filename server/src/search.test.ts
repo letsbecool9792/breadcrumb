@@ -17,6 +17,7 @@ import {
   VECTOR_INDEX,
 } from "./memories.ts";
 import { type Interpretation, type QueryParser, understanding } from "./query.ts";
+import { linkSites } from "./sources.ts";
 import {
   answerSearch,
   DEFAULT_LIMIT,
@@ -90,7 +91,7 @@ describe("searchPipeline", () => {
 
   test("a filter narrows both halves, not just one", () => {
     // narrowing one half only would let the other bring back what was filtered out
-    const fusion = stage(searchPipeline("x", [1, 0], 5, { sourceAppLabel: "WhatsApp" }), "$rankFusion");
+    const fusion = stage(searchPipeline("x", [1, 0], 5, { source: { label: "WhatsApp", sites: [] } }), "$rankFusion");
     const halves = (fusion["input"] as { pipelines: Record<string, Stage[]> }).pipelines;
 
     assert.deepEqual(halves["vector"]?.[0]?.["$vectorSearch"]?.["filter"], { sourceAppLabel: { $eq: "WhatsApp" } });
@@ -130,14 +131,40 @@ describe("the filter, in each half's language", () => {
     const from = new Date(2026, 3, 1);
     const to = new Date(2026, 4, 1);
 
-    assert.deepEqual(mqlFilter({ types: ["IMAGE"], from, to, sourceAppLabel: "WhatsApp" }), {
+    const source = { label: "WhatsApp", sites: [] };
+    assert.deepEqual(mqlFilter({ types: ["IMAGE"], from, to, source }), {
       $and: [
         { type: { $in: ["IMAGE"] } },
         { datedAt: { $gte: from, $lt: to } },
         { sourceAppLabel: { $eq: "WhatsApp" } },
       ],
     });
-    assert.equal(searchFilterClauses({ types: ["IMAGE"], from, to, sourceAppLabel: "WhatsApp" }).length, 3);
+    assert.equal(searchFilterClauses({ types: ["IMAGE"], from, to, source }).length, 3);
+  });
+
+  test("a source with a site matches the app or a link to the site", () => {
+    const source = { label: "Instagram", sites: ["instagr.am", "instagram.com"] };
+
+    assert.deepEqual(mqlFilter({ source }), {
+      $or: [{ sourceAppLabel: { $eq: "Instagram" } }, { linkSites: { $in: ["instagr.am", "instagram.com"] } }],
+    });
+    assert.deepEqual(searchFilterClauses({ source }), [
+      {
+        compound: {
+          should: [
+            { equals: { path: "sourceAppLabel", value: "Instagram" } },
+            { in: { path: "linkSites", value: ["instagr.am", "instagram.com"] } },
+          ],
+          minimumShouldMatch: 1,
+        },
+      },
+    ]);
+  });
+
+  test("the parsed source carries the sites it goes by", () => {
+    const filter = filterFor({ query: "", types: ["LINK"], from: null, to: null, sourceApp: "Instagram" }, ["instagram.com"]);
+
+    assert.deepEqual(filter.source, { label: "Instagram", sites: ["instagram.com"] });
   });
 
   test("a range may be open at either end", () => {
@@ -162,7 +189,9 @@ describe("the filter, in each half's language", () => {
  * about which apps exist, and a search would fail on it.
  */
 describe("GET /search, when it cannot search", () => {
-  const labelsOnly = { collection: () => ({ distinct: async () => [] }) } as unknown as Db;
+  const labelsOnly = {
+    collection: () => ({ distinct: async () => [], aggregate: () => ({ toArray: async () => [] }) }),
+  } as unknown as Db;
 
   let embedFailure: Error;
   let server: Server;
@@ -349,8 +378,34 @@ const seeded: MemoryDoc[] = (
       rawText: "check this https://example.com/article",
       embedding: direction([10, 1]),
     },
+    // an Instagram link shared from Instagram, and one sent on Telegram: both are "from Instagram"
+    {
+      ...base,
+      _id: "insta-app",
+      type: "LINK",
+      hasLink: true,
+      sourceAppLabel: "Instagram",
+      capturedAt: new Date("2026-09-13T10:00:00.000Z"),
+      // an id-like path: a word in it would be found by other tests' phrases
+      rawText: "https://www.instagram.com/p/C9xk2Qa",
+    },
+    {
+      ...base,
+      _id: "insta-telegram",
+      type: "LINK",
+      hasLink: true,
+      sourceAppLabel: "Telegram",
+      capturedAt: new Date("2026-09-14T10:00:00.000Z"),
+      rawText: "sunset reel https://instagram.com/reel/C8yz1Pb",
+    },
   ] as MemoryDoc[]
-).map((doc) => ({ ...doc, _id: `breadcrumb-test-${doc._id}`, datedAt: datedAt(doc) }));
+).map((doc) => ({
+  ...doc,
+  _id: `breadcrumb-test-${doc._id}`,
+  datedAt: datedAt(doc),
+  // as ingest derives it
+  linkSites: linkSites(doc.rawText),
+}));
 
 const seededIds = seeded.map((doc) => doc._id);
 const embeddedCount = seeded.filter((doc) => doc.embedding).length;
@@ -381,6 +436,7 @@ const parses: Record<string, Interpretation | Error> = {
   "internship saved in September": { ...none, query: "internship", from: "2026-09-01", to: "2026-09-30" },
   "that link from WhatsApp": { ...none, query: "", types: ["LINK"], sourceApp: "WhatsApp" },
   "the link from WhatsApp saying check this": { ...none, query: "check this", types: ["LINK"], sourceApp: "WhatsApp" },
+  "that link from Instagram": { ...none, query: "", types: ["LINK"], sourceApp: "Instagram" },
   stuff: { ...none, query: "" },
   Qualcomm: new Error("503 UNAVAILABLE: the model is overloaded"),
 };
@@ -655,6 +711,14 @@ describe(
         // all filter and no words: listed, not ranked, and no embedding paid for
         assert.ok(found.results.every((hit) => hit.score === null));
         assert.deepEqual(embeddedPhrases, []);
+      });
+
+      test("'that link from Instagram' also finds an Instagram link sent on another app", async (t) => {
+        const found = await answer(t, "that link from Instagram");
+        if (!found) return;
+
+        // shared from the Instagram app, or pointing at instagram.com: both, newest first
+        assert.deepEqual(ids(found.results), ["insta-telegram", "insta-app"]);
       });
 
       test("the same filters narrow a search with words in it, through both halves", async (t) => {

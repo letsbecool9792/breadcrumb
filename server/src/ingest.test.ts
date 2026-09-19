@@ -181,6 +181,8 @@ describe(
       assert.equal(stored?.embeddedWith?.dimensions, 768);
       assert.equal(stored?.title, sent.title);
       assert.equal(stored?.sourceAppLabel, "Chrome");
+      // where the link goes, for "that link from <site>" however it arrived
+      assert.deepEqual(stored?.linkSites, ["example.com"]);
       assert.equal(stored?.enrichment?.kind, "job posting");
       assert.deepEqual(stored?.enrichment?.entities, ["Qualcomm"]);
       assert.deepEqual(stored?.enrichment?.dates, ["2026-04-30"]);

@@ -82,9 +82,11 @@ describe("dates", () => {
 });
 
 describe("understanding", () => {
-  /** Answers the labels question and nothing else. */
-  const labelsDb = (labels: string[]) =>
-    ({ collection: () => ({ distinct: async () => labels }) }) as unknown as Db;
+  /** Answers the sources questions -- which apps, which sites how often -- and nothing else. */
+  const labelsDb = (labels: string[], sites: { _id: string; n: number }[] = []) =>
+    ({
+      collection: () => ({ distinct: async () => labels, aggregate: () => ({ toArray: async () => sites }) }),
+    }) as unknown as Db;
 
   const interpretation: Interpretation = { query: "internship", types: ["IMAGE"], from: null, to: null, sourceApp: null };
 
@@ -127,6 +129,35 @@ describe("understanding", () => {
     await understand(labelsDb(["WhatsApp", "Chrome", " "]), "x");
 
     assert.deepEqual(seen, { today: "2026-09-18", sourceApps: ["Chrome", "WhatsApp"] });
+  });
+
+  test("the sites saved links go to are offered too, named as a person says them", async () => {
+    let seen: QueryContext | undefined;
+    const understand = understanding(async (_query, given) => {
+      seen = given;
+      return { ...interpretation, sourceApp: "YouTube" };
+    }, () => new Date(2026, 8, 18, 12, 0));
+
+    const understood = await understand(
+      labelsDb(["Instagram", "WhatsApp"], [
+        { _id: "instagram.com", n: 3 },
+        { _id: "youtube.com", n: 2 },
+        { _id: "youtu.be", n: 1 },
+      ]),
+      "that youtube video",
+    );
+
+    // Instagram once, meaning the app and the site; YouTube once for both its domains
+    assert.deepEqual(seen?.sourceApps, ["Instagram", "WhatsApp", "YouTube"]);
+    assert.deepEqual(understood.sites, ["youtu.be", "youtube.com"]);
+  });
+
+  test("an app with no site of its own brings no sites", async () => {
+    const understand = understanding(async () => ({ ...interpretation, sourceApp: "WhatsApp" }));
+
+    const understood = await understand(labelsDb(["WhatsApp"], [{ _id: "instagram.com", n: 1 }]), "x");
+
+    assert.deepEqual(understood.sites, []);
   });
 
   test("a failed parse says why, and is not remembered", async () => {
@@ -187,6 +218,16 @@ describe(
       assert.equal(result.sourceApp, "WhatsApp");
       assert.equal(result.from, null);
       assert.doesNotMatch(result.query, /whatsapp|link/i);
+    });
+
+    test("'ig link' is a link from Instagram, the nickname matched", async (t) => {
+      const result = await parsed(t, "ig link");
+      if (!result) return;
+
+      // Instagram names the app and its site alike; the search matches either
+      assert.deepEqual(result.types, ["LINK"]);
+      assert.equal(result.sourceApp, "Instagram");
+      assert.equal(result.query, "");
     });
 
     test("a phrase with no filter in it is left alone", async (t) => {

@@ -1,4 +1,5 @@
 import type { Collection, Db } from "mongodb";
+import { linkSites } from "./sources.ts";
 
 export type MemoryType = "TEXT" | "LINK" | "IMAGE" | "PDF" | "AUDIO";
 
@@ -27,6 +28,12 @@ export interface MemoryDoc {
   datedAt: Date;
   sourceApp?: string | null;
   sourceAppLabel?: string | null;
+  /**
+   * The sites the links in its shared text point to ("instagram.com"), so a
+   * source filter finds an Instagram link however it arrived (sources.ts).
+   * Derived here, never sent by the phone; empty when it holds no link.
+   */
+  linkSites?: string[];
   title?: string | null;
   rawText?: string | null;
   /** What the phone read out of it: OCR on a picture (step 2.1), a PDF's text, a link's page. */
@@ -112,6 +119,24 @@ export async function backfillDatedAt(database: Db): Promise<number> {
 }
 
 /**
+ * Gives documents stored before linkSites existed theirs. Idempotent, like
+ * [backfillDatedAt]: every document it touches gets the field, even an empty
+ * one, so a second run matches nothing.
+ */
+export async function backfillLinkSites(database: Db): Promise<number> {
+  const missing = await memories(database)
+    .find({ linkSites: { $exists: false } }, { projection: { rawText: 1 } })
+    .toArray();
+  if (missing.length === 0) return 0;
+  await memories(database).bulkWrite(
+    missing.map((doc) => ({
+      updateOne: { filter: { _id: doc._id }, update: { $set: { linkSites: linkSites(doc.rawText) } } },
+    })),
+  );
+  return missing.length;
+}
+
+/**
  * Idempotent on the phone's id: re-sending the same memory replaces it.
  *
  * A replace, so a memory that loses a field on the phone loses it here too --
@@ -146,6 +171,8 @@ export function vectorIndexDefinition(dimensions: number) {
       { type: "filter", path: "sourceAppLabel" },
       // 4.3's date filter
       { type: "filter", path: "datedAt" },
+      // a source filter also matches the sites links point to
+      { type: "filter", path: "linkSites" },
       // narrowing to given memories; the search tests use it to see only their own
       { type: "filter", path: "_id" },
     ],
@@ -204,6 +231,7 @@ export function textIndexDefinition() {
         capturedAt: { type: "date" },
         sourceAppLabel: { type: "token" },
         datedAt: { type: "date" },
+        linkSites: { type: "token" },
         _id: { type: "token" },
       },
     },

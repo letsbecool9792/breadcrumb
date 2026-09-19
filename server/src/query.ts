@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import type { Db } from "mongodb";
 import { pinnedModel } from "./gemini.ts";
 import { type MemoryType, memories } from "./memories.ts";
+import { siteName } from "./sources.ts";
 
 /**
  * Flash Lite, and a different one from ingest's on purpose: the free tier
@@ -30,14 +31,18 @@ export interface Interpretation {
   /** Inclusive, YYYY-MM-DD, on the searcher's calendar. Either may be open. */
   from: string | null;
   to: string | null;
-  /** One of the source labels memories actually carry. */
+  /**
+   * Where it came from: one of the names in [QueryContext.sourceApps] -- an
+   * app something was shared from, or a site a saved link points to. A
+   * search matches either (sources.ts).
+   */
   sourceApp: string | null;
 }
 
 export interface QueryContext {
   /** YYYY-MM-DD, so "April" and "last week" can be placed. */
   today: string;
-  /** The source labels memories actually carry; a parsed app must be one of them. */
+  /** The apps memories were shared from and the sites their links go to; a parsed source must be one of them. */
   sourceApps: string[];
 }
 
@@ -60,8 +65,10 @@ Return:
 - from, to: only when they say when, as inclusive dates, YYYY-MM-DD. A month or season with no
   year means the most recent one that has begun by today. "last week" is the previous Monday to
   Sunday. Vague words -- "recently", "a while ago", "old" -- set nothing.
-- sourceApp: only when they say which app it came from, and then only a name from the list you
-  are given, matched loosely ("insta" is Instagram). Empty if they name none, or one not listed.
+- sourceApp: only when they say where it came from -- the app it was shared from, or the site a
+  link goes to ("an ig link", "that YouTube video") -- and then only a name from the list you are
+  given, matched loosely ("insta" and "ig" are Instagram, "twitter" is X). Empty if they name
+  none, or one not listed.
 
 Never add a filter the words do not ask for. Leave a field empty rather than guess.`;
 
@@ -86,7 +93,7 @@ function describe(query: string, context: QueryContext): string {
   const weekday = WEEKDAYS[localDay(context.today).getDay()];
   return [
     `Today: ${weekday}, ${context.today}`,
-    `Apps things were saved from: ${context.sourceApps.join(", ") || "(none recorded)"}`,
+    `Apps and sites things came from: ${context.sourceApps.join(", ") || "(none recorded)"}`,
     `Search: ${query}`,
   ].join("\n");
 }
@@ -180,15 +187,65 @@ export function formatDay(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-/** Every source label memories carry, for the parser to choose from. */
-export async function knownSourceApps(database: Db): Promise<string[]> {
-  const labels = await memories(database).distinct("sourceAppLabel", { sourceAppLabel: { $type: "string" } });
-  return (labels as string[]).filter((label) => label.trim().length > 0).sort();
+/**
+ * Site names offered to the parser, at most: the most linked-to first. Every
+ * app label is offered whatever this is; a site too rarely saved to make the
+ * list is still found by its words.
+ */
+const MAX_SITE_NAMES = 40;
+
+/** The names the parser may choose a source from, and the sites each covers. */
+export interface Sources {
+  names: string[];
+  /** Lowercased name -> the sites that go by it. An app with no site has none. */
+  sites: Map<string, string[]>;
+}
+
+/**
+ * Every source memories carry, for the parser to choose from: the apps they
+ * were shared from, and the sites their links point to, named as a person
+ * would ("Instagram" for instagram.com and instagr.am alike).
+ */
+export async function knownSources(database: Db): Promise<Sources> {
+  const labels = (
+    (await memories(database).distinct("sourceAppLabel", { sourceAppLabel: { $type: "string" } })) as string[]
+  )
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0);
+
+  const counted = await memories(database)
+    .aggregate<{ _id: string; n: number }>([
+      { $unwind: "$linkSites" },
+      { $group: { _id: "$linkSites", n: { $sum: 1 } } },
+    ])
+    .toArray();
+
+  const sites = new Map<string, string[]>();
+  const weight = new Map<string, { name: string; n: number }>();
+  for (const { _id: site, n } of counted) {
+    const name = siteName(site);
+    const key = name.toLowerCase();
+    sites.set(key, [...(sites.get(key) ?? []), site].sort());
+    weight.set(key, { name, n: (weight.get(key)?.n ?? 0) + n });
+  }
+  const siteNames = [...weight.values()]
+    .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name))
+    .slice(0, MAX_SITE_NAMES)
+    .map((entry) => entry.name);
+
+  // an app and its site share one name: "Instagram" once, meaning both
+  const names = new Map<string, string>();
+  for (const name of [...labels, ...siteNames]) {
+    if (!names.has(name.toLowerCase())) names.set(name.toLowerCase(), name);
+  }
+  return { names: [...names.values()].sort(), sites };
 }
 
 export interface Understanding {
   /** null when the parse failed; the search then runs on the raw phrase, unfiltered. */
   interpretation: Interpretation | null;
+  /** The sites the parsed source covers, for the filter to match beside the app. */
+  sites: string[];
   error?: string;
 }
 
@@ -207,26 +264,29 @@ const LABELS_FOR_MS = 5 * 60_000;
  */
 export function understanding(parse: QueryParser, now: () => Date = () => new Date()) {
   const remembered = new Map<string, Interpretation>();
-  let labels: { at: number; value: string[] } | undefined;
+  let sources: { at: number; value: Sources } | undefined;
 
   return async (database: Db, query: string): Promise<Understanding> => {
     const at = now();
-    if (!labels || at.getTime() - labels.at > LABELS_FOR_MS) {
-      labels = { at: at.getTime(), value: await knownSourceApps(database) };
+    if (!sources || at.getTime() - sources.at > LABELS_FOR_MS) {
+      sources = { at: at.getTime(), value: await knownSources(database) };
     }
-    const context: QueryContext = { today: formatDay(at), sourceApps: labels.value };
+    const known = sources.value;
+    const context: QueryContext = { today: formatDay(at), sourceApps: known.names };
     const key = JSON.stringify([context.today, context.sourceApps, query]);
+    const sitesOf = (interpretation: Interpretation) =>
+      interpretation.sourceApp ? (known.sites.get(interpretation.sourceApp.toLowerCase()) ?? []) : [];
 
-    const known = remembered.get(key);
-    if (known) return { interpretation: known };
+    const cached = remembered.get(key);
+    if (cached) return { interpretation: cached, sites: sitesOf(cached) };
 
     try {
       const interpretation = await parse(query, context);
       remembered.set(key, interpretation);
       if (remembered.size > MAX_REMEMBERED) remembered.delete(remembered.keys().next().value as string);
-      return { interpretation };
+      return { interpretation, sites: sitesOf(interpretation) };
     } catch (error) {
-      return { interpretation: null, error: error instanceof Error ? error.message : String(error) };
+      return { interpretation: null, sites: [], error: error instanceof Error ? error.message : String(error) };
     }
   };
 }

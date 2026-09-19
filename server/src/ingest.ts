@@ -3,6 +3,7 @@ import type { Db } from "mongodb";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, type Embedder, embeddingText } from "./embeddings.ts";
 import { type Extractor, isTransient } from "./gemini.ts";
 import { datedAt, type MemoryDoc, type MemoryType, memories, putMemories } from "./memories.ts";
+import { linkSites } from "./sources.ts";
 
 const TYPES: MemoryType[] = ["TEXT", "LINK", "IMAGE", "PDF", "AUDIO"];
 
@@ -193,6 +194,7 @@ export async function ingest(
       datedAt: datedAt(memory),
       sourceApp: memory.sourceApp,
       sourceAppLabel: memory.sourceAppLabel,
+      linkSites: linkSites(memory.rawText),
       title: memory.title,
       rawText: memory.rawText,
       extractedText: memory.extractedText,

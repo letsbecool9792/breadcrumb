@@ -21,8 +21,20 @@ export interface SearchFilter {
   /** On datedAt: from inclusive, to exclusive. */
   from?: Date;
   to?: Date;
-  sourceAppLabel?: string;
+  /**
+   * Where it came from: shared from the app called [SourceFilter.label], or
+   * holding a link to one of [SourceFilter.sites] -- either. "That link from
+   * Instagram" is both the one shared from Instagram and the Instagram link
+   * sent on WhatsApp.
+   */
+  source?: SourceFilter;
   ids?: string[];
+}
+
+export interface SourceFilter {
+  label: string;
+  /** Registrable domains going by the same name ("instagram.com"); empty for an app with no site. */
+  sites: string[];
 }
 
 export interface SearchRequest {
@@ -206,7 +218,10 @@ export function mqlFilter(filter: SearchFilter): Record<string, unknown> {
   if (filter.from || filter.to) {
     clauses.push({ datedAt: { ...(filter.from ? { $gte: filter.from } : {}), ...(filter.to ? { $lt: filter.to } : {}) } });
   }
-  if (filter.sourceAppLabel !== undefined) clauses.push({ sourceAppLabel: { $eq: filter.sourceAppLabel } });
+  if (filter.source) {
+    const byApp = { sourceAppLabel: { $eq: filter.source.label } };
+    clauses.push(filter.source.sites.length ? { $or: [byApp, { linkSites: { $in: filter.source.sites } }] } : byApp);
+  }
   if (filter.ids) clauses.push({ _id: { $in: filter.ids } });
 
   if (clauses.length === 0) return {};
@@ -229,8 +244,13 @@ export function searchFilterClauses(filter: SearchFilter): object[] {
       range: { path: "datedAt", ...(filter.from ? { gte: filter.from } : {}), ...(filter.to ? { lt: filter.to } : {}) },
     });
   }
-  if (filter.sourceAppLabel !== undefined) {
-    clauses.push({ equals: { path: "sourceAppLabel", value: filter.sourceAppLabel } });
+  if (filter.source) {
+    const byApp = { equals: { path: "sourceAppLabel", value: filter.source.label } };
+    clauses.push(
+      filter.source.sites.length
+        ? { compound: { should: [byApp, { in: { path: "linkSites", value: filter.source.sites } }], minimumShouldMatch: 1 } }
+        : byApp,
+    );
   }
   if (filter.ids) clauses.push({ in: { path: "_id", value: filter.ids } });
   return clauses;
@@ -343,13 +363,17 @@ function toHit(doc: Projected): SearchHit {
   };
 }
 
-/** Turns what the parser read into the filter both halves run under. */
-export function filterFor(interpretation: Interpretation): SearchFilter {
+/**
+ * Turns what the parser read into the filter both halves run under.
+ *
+ * @param sites the sites its source goes by, beside the app of that name.
+ */
+export function filterFor(interpretation: Interpretation, sites: string[] = []): SearchFilter {
   return {
     ...(interpretation.types.length ? { types: interpretation.types } : {}),
     ...(interpretation.from ? { from: localDay(interpretation.from) } : {}),
     ...(interpretation.to ? { to: dayAfter(interpretation.to) } : {}),
-    ...(interpretation.sourceApp ? { sourceAppLabel: interpretation.sourceApp } : {}),
+    ...(interpretation.sourceApp ? { source: { label: interpretation.sourceApp, sites } } : {}),
   };
 }
 
@@ -381,8 +405,8 @@ export async function answerSearch(
   understand: Understand,
   request: SearchRequest,
 ): Promise<AnswerOutcome> {
-  const { interpretation, error } = await understand(database, request.query);
-  const filter: SearchFilter = { ...(interpretation ? filterFor(interpretation) : {}), ...request.filter };
+  const { interpretation, sites, error } = await understand(database, request.query);
+  const filter: SearchFilter = { ...(interpretation ? filterFor(interpretation, sites) : {}), ...request.filter };
 
   // Words the parser left, or the phrase itself when it took everything and
   // filtered nothing ("stuff") -- an empty search is never what was meant.
