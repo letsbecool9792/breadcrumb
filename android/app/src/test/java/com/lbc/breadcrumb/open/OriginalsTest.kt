@@ -84,10 +84,40 @@ class OriginalsTest {
     }
 
     @Test
-    fun `a note is shared as its words, and never with the note written about it`() {
-        val note = Memory(type = MemoryType.TEXT, rawText = " Naru's, book two weeks ahead ", note = "Priya's pick")
+    fun `a note is shared as its words`() {
+        val note = Memory(type = MemoryType.TEXT, rawText = " Naru's, book two weeks ahead ")
 
         assertEquals(ShareOut.Text("Naru's, book two weeks ahead"), Originals.shareFor(note, holding()))
+    }
+
+    // --- the person's note goes with it ---------------------------------------------
+
+    @Test
+    fun `a picture carries the note as its caption`() {
+        val photo = Memory(id = "m1", type = MemoryType.IMAGE, note = " the balcony at Priya's ")
+
+        assertEquals(ShareOut.File(stored, "image/jpeg", caption = "the balcony at Priya's"), Originals.shareFor(photo, holding(stored)))
+    }
+
+    @Test
+    fun `a link goes with the note on the line before it`() {
+        val link = Memory(type = MemoryType.LINK, rawText = "https://example.com/reel/1", title = "A reel", note = "you'll love this")
+
+        assertEquals(ShareOut.Text("you'll love this\nhttps://example.com/reel/1", "A reel"), Originals.shareFor(link, holding()))
+    }
+
+    @Test
+    fun `a saved thought goes with the note after its own words`() {
+        val thought = Memory(type = MemoryType.TEXT, rawText = "Naru's, book two weeks ahead", note = "Priya's pick")
+
+        assertEquals(ShareOut.Text("Naru's, book two weeks ahead\n\nPriya's pick"), Originals.shareFor(thought, holding()))
+    }
+
+    @Test
+    fun `a blank note is no note`() {
+        val photo = Memory(id = "m1", type = MemoryType.IMAGE, note = "   ")
+
+        assertEquals(ShareOut.File(stored, "image/jpeg"), Originals.shareFor(photo, holding(stored)))
     }
 
     @Test

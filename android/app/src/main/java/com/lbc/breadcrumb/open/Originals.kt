@@ -39,11 +39,13 @@ sealed interface OriginalAction {
 
 /**
  * What sharing a memory onward sends (the detail's share button): the thing
- * itself, as it was saved -- never the app's reading of it, nor the note.
+ * itself, as it was saved, with the person's note beside it -- their words
+ * about it are usually why they are passing it on. Never the app's own
+ * reading of it.
  */
 sealed interface ShareOut {
-    /** A stored picture or PDF, sent as the file. */
-    data class File(val file: java.io.File, val mimeType: String) : ShareOut
+    /** A stored picture or PDF, sent as the file; the note goes as its caption. */
+    data class File(val file: java.io.File, val mimeType: String, val caption: String? = null) : ShareOut
 
     /** A link's URL, or a note's words. [subject] is a page's title, for apps that use one. */
     data class Text(val text: String, val subject: String? = null) : ShareOut
@@ -124,19 +126,29 @@ object Originals {
 
     /**
      * What sharing [memory] onward sends, or null when there is nothing to
-     * send -- a file gone, an empty note. A link goes as its URL alone: the
-     * words around it were someone else's message, not the thing.
+     * send -- a file gone, an empty note. The person's note goes with it: as
+     * a picture's or PDF's caption (WhatsApp and most chat apps take one), on
+     * the line before a link, and after a note's own words.
+     *
+     * A link goes as its URL, not the message around it: those words were
+     * someone else's, and the note says what the person wants said.
      */
-    fun shareFor(memory: Memory, fileFor: (Memory) -> File?): ShareOut? = when (memory.type) {
-        MemoryType.IMAGE, MemoryType.PDF, MemoryType.AUDIO ->
-            fileFor(memory)?.let { ShareOut.File(it, mimeType(memory.type, it.extension)) }
-        MemoryType.LINK -> UrlText.firstUrl(memory.rawText)?.let { ShareOut.Text(it, subject = memory.title) }
-            ?: sharedWords(memory)
-        MemoryType.TEXT -> sharedWords(memory)
+    fun shareFor(memory: Memory, fileFor: (Memory) -> File?): ShareOut? {
+        val note = memory.note?.trim()?.takeIf { it.isNotEmpty() }
+        return when (memory.type) {
+            MemoryType.IMAGE, MemoryType.PDF, MemoryType.AUDIO ->
+                fileFor(memory)?.let { ShareOut.File(it, mimeType(memory.type, it.extension), caption = note) }
+            MemoryType.LINK -> UrlText.firstUrl(memory.rawText)
+                ?.let { url -> ShareOut.Text(listOfNotNull(note, url).joinToString("\n"), subject = memory.title) }
+                ?: sharedWords(memory, note)
+            MemoryType.TEXT -> sharedWords(memory, note)
+        }
     }
 
-    private fun sharedWords(memory: Memory): ShareOut? =
-        memory.rawText?.trim()?.takeIf { it.isNotEmpty() }?.let { ShareOut.Text(it) }
+    private fun sharedWords(memory: Memory, note: String?): ShareOut? =
+        memory.rawText?.trim()?.takeIf { it.isNotEmpty() }?.let { words ->
+            ShareOut.Text(listOfNotNull(words, note).joinToString("\n\n"))
+        }
 
     fun shareFor(context: Context, memory: Memory): ShareOut? = shareFor(memory, OriginalStore(context)::fileFor)
 
@@ -153,6 +165,8 @@ object Originals {
                 send.setType(share.mimeType)
                     .putExtra(Intent.EXTRA_STREAM, uri)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                // the caption, where the receiving app takes one
+                share.caption?.let { send.putExtra(Intent.EXTRA_TEXT, it) }
                 // the sheet's own preview reads the file through this
                 send.clipData = ClipData.newRawUri(null, uri)
             }

@@ -95,13 +95,15 @@ class OriginalsProviderTest {
 
     @Test
     fun sharingOnwardSendsTheFileReadableAndLeavesBreadcrumbOutOfTheSheet() {
-        val chooser = Originals.shareIntent(context, ShareOut.File(original, "image/png"))
+        val chooser = Originals.shareIntent(context, ShareOut.File(original, "image/png", caption = "the balcony"))
         val send = IntentCompat.getParcelableExtra(chooser, Intent.EXTRA_INTENT, Intent::class.java)!!
         val uri = IntentCompat.getParcelableExtra(send, Intent.EXTRA_STREAM, Uri::class.java)!!
 
         assertEquals(Intent.ACTION_CHOOSER, chooser.action)
         assertEquals(Intent.ACTION_SEND, send.action)
         assertEquals("image/png", send.type)
+        // the note, as the caption a chat app sends under the picture
+        assertEquals("the balcony", send.getStringExtra(Intent.EXTRA_TEXT))
         assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
         assertEquals(0, send.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         assertArrayEquals(bytes, context.contentResolver.openInputStream(uri)!!.use { it.readBytes() })
