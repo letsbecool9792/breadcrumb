@@ -56,12 +56,14 @@ class PdfReader(private val ocr: MlKitOcrReader) : OcrReader {
     }
 
     private suspend fun read(renderer: PdfRenderer): String {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+        val layer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             val (pages, read) = textLayer(renderer)
-            val text = PdfRules.clean(pages)
-            if (PdfRules.hasTextLayer(text, read)) return text
+            PdfRules.clean(pages).also { if (PdfRules.hasTextLayer(it, read)) return it }
+        } else {
+            ""
         }
-        return PdfRules.clean(recognized(renderer))
+        // thin or missing: read the pages by eye too, and keep whichever says more
+        return PdfRules.better(layer, PdfRules.clean(recognized(renderer)))
     }
 
     /** Each page's own text, until enough is gathered. Returns the pages' text and how many were read. */

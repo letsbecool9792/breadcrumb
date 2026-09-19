@@ -30,11 +30,11 @@ object PdfRules {
     const val MAX_OCR_PAGES = 6
 
     /**
-     * Below this many letters and digits per page, the text layer is taken
-     * for missing: a scan often carries a stray page number or a stamp, and
-     * nothing else.
+     * Below this many letters and digits per page, the text layer may be
+     * missing: a scan often carries a stray page number or a stamp, and
+     * nothing else. Then the pages are read by OCR too, and [better] decides.
      */
-    const val MIN_CHARS_PER_PAGE = 40
+    const val MIN_CHARS_PER_PAGE = 20
 
     /** The long side of a page rendered for OCR: small print stays legible to the recognizer. */
     const val OCR_LONG_SIDE_PX = 2_000
@@ -47,6 +47,20 @@ object PdfRules {
         if (pages <= 0) return false
         val meaningful = text.count(Char::isLetterOrDigit)
         return meaningful >= MIN_CHARS_PER_PAGE * pages.coerceAtMost(3)
+    }
+
+    /**
+     * Between a thin text layer and what OCR read off the same pages: the
+     * layer, which is exact, unless OCR found clearly more -- twice as much,
+     * and not by a word or two. A one-line PDF keeps its own words; a scan
+     * with a page number in its layer is read by OCR.
+     */
+    fun better(layer: String, recognized: String): String {
+        val fromLayer = layer.count(Char::isLetterOrDigit)
+        // no layer at all -- older Android, or a pure scan: whatever OCR read
+        if (fromLayer == 0) return recognized
+        val fromOcr = recognized.count(Char::isLetterOrDigit)
+        return if (fromOcr >= fromLayer * 2 && fromOcr - fromLayer >= MIN_CHARS_PER_PAGE) recognized else layer
     }
 
     /**

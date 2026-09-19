@@ -30,6 +30,32 @@ class PdfRulesTest {
     }
 
     @Test
+    fun aShortOneLinePdfStillHasATextLayer() {
+        // found on the phone: a 36-character line was taken for a scan and misread by OCR
+        assertTrue(PdfRules.hasTextLayer("Invoice 4471-B for ACME Widgets, due 30 April", pages = 1))
+    }
+
+    @Test
+    fun aThinLayerIsKeptOverOcrThatFoundNoMore() {
+        val layer = "Boarding pass BLR to DEL"
+        // OCR is close, never exact: it must not win a tie
+        assertEquals(layer, PdfRules.better(layer, "Boarding pass BLR to DEl."))
+    }
+
+    @Test
+    fun ocrWinsWhenTheLayerHeldOnlyAStamp() {
+        val scan = "Lease agreement between the owner and the tenant of Flat 4B, Koramangala"
+
+        assertEquals(scan, PdfRules.better("Page 1", scan))
+        assertEquals(scan, PdfRules.better("", scan))
+    }
+
+    @Test
+    fun withNoLayerAtAllEvenAShortOcrReadingIsKept() {
+        assertEquals("Receipt 42", PdfRules.better("", "Receipt 42"))
+    }
+
+    @Test
     fun noPagesMeansNoTextLayer() {
         assertFalse(PdfRules.hasTextLayer("plenty of text here, really", pages = 0))
     }
